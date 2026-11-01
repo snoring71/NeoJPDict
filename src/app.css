@@ -1,0 +1,183 @@
+/* Colour tokens follow Windows 11 Fluent defaults; the sidebar stays translucent so Mica shows through. */
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif;
+  --font-ui-jp: "Yu Gothic UI", "Segoe UI", "Meiryo UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --font-mincho: "Yu Mincho", "YuMincho", "BIZ UDMincho", "Hiragino Mincho ProN", "Noto Serif JP", "IPAMincho", serif;
+  --font-gothic: "Yu Gothic", "YuGothic", "BIZ UDGothic", "Meiryo", "Hiragino Sans", "Noto Sans JP", sans-serif;
+
+  --accent: #005fb8;
+  --accent-text: #005fb8;
+  --on-accent: #ffffff;
+  --link: #005fb8;
+  --label-red: #c42b1c;
+  --text-1: #1a1a1a;
+  --text-2: #5d5d5d;
+  --text-3: #8a8a8a;
+  --sidebar: rgb(243 243 243 / 0.86);
+  --sidebar-solid: #f3f3f3;
+  --toolbar: #fbfbfb;
+  --reader-bg: #ffffff;
+  --card: #fbfbfb;
+  --flyout: #fcfcfc;
+  --field: rgb(255 255 255 / 0.7);
+  --field-focus: #ffffff;
+  --field-border: rgb(0 0 0 / 0.06);
+  --field-border-bottom: rgb(0 0 0 / 0.45);
+  --hover: rgb(0 0 0 / 0.045);
+  --selected: rgb(0 0 0 / 0.06);
+  --divider: rgb(0 0 0 / 0.08);
+  --divider-strong: rgb(0 0 0 / 0.2);
+  --shadow: 0 8px 16px rgb(0 0 0 / 0.14);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #4cc2ff;
+    --accent-text: #60cdff;
+    --on-accent: #000000;
+    --link: #60cdff;
+    --label-red: #ff99a4;
+    --text-1: #ffffff;
+    --text-2: #c5c5c5;
+    --text-3: #9a9a9a;
+    --sidebar: rgb(32 32 32 / 0.8);
+    --sidebar-solid: #202020;
+    --toolbar: #272727;
+    --reader-bg: #1c1c1c;
+    --card: #2b2b2b;
+    --flyout: #2c2c2c;
+    --field: rgb(255 255 255 / 0.06);
+    --field-focus: #1f1f1f;
+    --field-border: rgb(255 255 255 / 0.08);
+    --field-border-bottom: rgb(255 255 255 / 0.55);
+    --hover: rgb(255 255 255 / 0.06);
+    --selected: rgb(255 255 255 / 0.08);
+    --divider: rgb(255 255 255 / 0.08);
+    --divider-strong: rgb(255 255 255 / 0.25);
+    --shadow: 0 8px 16px rgb(0 0 0 / 0.4);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --accent: #4cc2ff;
+  --accent-text: #60cdff;
+  --on-accent: #000000;
+  --link: #60cdff;
+  --label-red: #ff99a4;
+  --text-1: #ffffff;
+  --text-2: #c5c5c5;
+  --text-3: #9a9a9a;
+  --sidebar: rgb(32 32 32 / 0.8);
+  --sidebar-solid: #202020;
+  --toolbar: #272727;
+  --reader-bg: #1c1c1c;
+  --card: #2b2b2b;
+  --flyout: #2c2c2c;
+  --field: rgb(255 255 255 / 0.06);
+  --field-focus: #1f1f1f;
+  --field-border: rgb(255 255 255 / 0.08);
+  --field-border-bottom: rgb(255 255 255 / 0.55);
+  --hover: rgb(255 255 255 / 0.06);
+  --selected: rgb(255 255 255 / 0.08);
+  --divider: rgb(255 255 255 / 0.08);
+  --divider-strong: rgb(255 255 255 / 0.25);
+  --shadow: 0 8px 16px rgb(0 0 0 / 0.4);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  /* Transparent so the Mica backdrop shows behind the sidebar in the Windows build. */
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body:not(.tauri) {
+  background: var(--sidebar-solid);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button:not(.icon):not(.tool):not(.hit):not(.group-head):not(.link):not(.title):not(.mode):not(.clear):not([role]):not(.dict-row):not(.text-btn) {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--divider-strong);
+  background: var(--card);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--on-accent);
+}
+
+button.icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+button.icon:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--text-1);
+  background: var(--field);
+  border: 1px solid var(--field-border);
+  border-bottom-color: var(--field-border-bottom);
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+
+select option {
+  background: var(--flyout);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--divider-strong);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
