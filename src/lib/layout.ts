@@ -103,6 +103,28 @@ function turnImages(root: HTMLElement) {
   }
 }
 
+// Symbols that read as one horizontal mark: ＊＊, ←→, ※…
+const SYMBOL = /[\p{S}\p{P}]/u;
+const LETTER = /[\p{L}\p{N}]/u;
+
+/**
+ * A short run of 2–3 symbols (e.g. the ＊＊ importance mark or the ←→ 書き分け注意 mark)
+ * is one sign, not text: in vertical lines it stays side by side, like 縦中横.
+ */
+function uprightSymbolRuns(root: HTMLElement) {
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>("span, a, b, i, sup"))) {
+    const text = (el.textContent ?? "").replace(/\s+/g, "");
+    const chars = [...text];
+    if (chars.length < 2 || chars.length > 3) continue;
+    if (!chars.every((c) => SYMBOL.test(c) && !LETTER.test(c) && !TURNING_BRACKET.test(c))) continue;
+    if (el.querySelector("img")) continue;
+    // Use the outermost element that holds just this run.
+    if (el.parentElement?.closest(".nj-upright")) continue;
+    el.classList.add("nj-upright");
+  }
+}
+const TURNING_BRACKET = /[()（）\[\]［］「」『』【】〔〕〈〉《》｟｠]/;
+
 function logicalInline(root: HTMLElement) {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>("[style]"))) {
     const s = el.getAttribute("style")!;
@@ -118,6 +140,9 @@ export function adaptHtml(html: string, vertical: boolean): string {
   root.innerHTML = html;
   logicalInline(root);
   realRuby(root);
-  if (vertical) turnImages(root);
+  if (vertical) {
+    turnImages(root);
+    uprightSymbolRuns(root);
+  }
   return root.innerHTML;
 }

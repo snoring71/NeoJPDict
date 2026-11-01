@@ -51,6 +51,25 @@
   );
 
   $effect(() => {
+    // Horizontal symbol runs (＊＊, ←→) in vertical text must fit the column like 縦中横.
+    body.html;
+    if (!scroller || !vertical) return;
+    queueMicrotask(() => {
+      for (const el of scroller!.querySelectorAll<HTMLElement>(".nj-upright")) {
+        el.style.transform = "";
+        const em = parseFloat(getComputedStyle(el).fontSize);
+        const parentEm = parseFloat(getComputedStyle(el.parentElement!).fontSize);
+        const limit = Math.max(em, parentEm) * 1.0;
+        const w = el.getBoundingClientRect().width;
+        if (w > limit) {
+          el.style.transform = `scaleX(${limit / w})`;
+          el.style.marginInline = `${-(w - limit) / 2}px`;
+        }
+      }
+    });
+  });
+
+  $effect(() => {
     // New entry: jump back to its start (right edge for vertical text).
     view;
     vertical;
@@ -479,6 +498,12 @@
   /* Horizontal-text alignment hints (text-bottom…) push turned marks off the column's centre line. */
   .entry-body :global(:has(> .nj-turn)) {
     vertical-align: baseline !important;
+  }
+  .entry-body :global(.nj-upright) {
+    display: inline-block;
+    writing-mode: horizontal-tb;
+    white-space: nowrap;
+    line-height: 1;
   }
   .entry-body :global(.nj-turn > img) {
     position: absolute;
