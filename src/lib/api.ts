@@ -44,6 +44,20 @@ export async function onImportProgress(cb: (e: ImportEvent) => void): Promise<()
   return listen<ImportEvent>("import-progress", (ev) => cb(ev.payload));
 }
 
+export interface IndexEvent {
+  dictId: number;
+  title: string;
+  done: number;
+  total: number;
+  finished: boolean;
+}
+
+export async function onIndexProgress(cb: (e: IndexEvent) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<IndexEvent>("index-progress", (ev) => cb(ev.payload));
+}
+
 export async function onFileDrop(cb: (paths: string[]) => void, hover: (on: boolean) => void) {
   if (!inTauri) return () => {};
   const { getCurrentWebview } = await import("@tauri-apps/api/webview");

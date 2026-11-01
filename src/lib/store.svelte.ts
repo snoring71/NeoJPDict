@@ -1,14 +1,14 @@
 import { api } from "./api";
-import type { DictionaryInfo, EntryView, HistoryItem, ImportEvent, MatchMode, SearchHit } from "./types";
+import type { HeadwordMode, DictionaryInfo, EntryView, HistoryItem, ImportEvent, MatchMode, SearchHit } from "./types";
 
 export type View = "search" | "browse" | "history" | "bookmarks" | "library" | "settings";
-export type Target = "headwords" | "kanji";
+export type Target = "headwords" | "idioms" | "examples" | "fulltext" | "kanji";
 
 class AppStore {
   view: View = $state("search");
   dictionaries: DictionaryInfo[] = $state([]);
   query = $state("");
-  matchMode: MatchMode = $state("prefix");
+  matchMode: HeadwordMode = $state("prefix");
   target: Target = $state("headwords");
   group = $state(""); // "" = all
   hits: SearchHit[] = $state([]);
@@ -24,6 +24,13 @@ class AppStore {
   dragging = $state(false);
   browseDict: number | null = $state(null);
   browseHits: SearchHit[] = $state([]);
+  /** Full-text indexing in progress: dictionary title and percentage. */
+  indexing: { title: string; pct: number } | null = $state(null);
+
+  /** Text to highlight in the open entry (the query, for text searches). */
+  get highlight(): string {
+    return this.target === "examples" || this.target === "fulltext" || this.target === "idioms" ? this.query.trim() : "";
+  }
 
   private searchSeq = 0;
 
@@ -61,7 +68,9 @@ class AppStore {
     }
     this.searching = true;
     try {
-      const hits = await api.search({ text, mode: this.matchMode, dictIds, limit: 300, deinflect: true });
+      const mode: MatchMode =
+        this.target === "idioms" ? "idiom" : this.target === "examples" ? "example" : this.target === "fulltext" ? "fullText" : this.matchMode;
+      const hits = await api.search({ text, mode, dictIds, limit: 300, deinflect: true });
       if (seq !== this.searchSeq) return; // a newer search started while this one ran
       this.hits = hits;
       // Show the first hit straight away, as 辞書 does.

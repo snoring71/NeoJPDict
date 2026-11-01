@@ -3,7 +3,7 @@
   import { app, type View } from "./lib/store.svelte";
   import { settings } from "./lib/settings.svelte";
   import { t, lang, type MessageKey } from "./lib/i18n";
-  import { api, onFileDrop, onImportProgress } from "./lib/api";
+  import { api, onFileDrop, onImportProgress, onIndexProgress } from "./lib/api";
   import Icon from "./components/Icon.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Reader from "./components/Reader.svelte";
@@ -11,6 +11,7 @@
   import SettingsView from "./components/SettingsView.svelte";
 
   let sidebar: ReturnType<typeof Sidebar> | undefined = $state();
+  let reader: ReturnType<typeof Reader> | undefined = $state();
 
   const tabs: { view: View; icon: string; label: MessageKey }[] = [
     { view: "search", icon: "search", label: "search" },
@@ -51,10 +52,16 @@
         if (!e.error) setTimeout(() => delete app.imports[e.path], 4000);
       }
     }).then((u) => unsubs.push(u));
+    onIndexProgress((e) => {
+      app.indexing = e.finished ? null : { title: e.title, pct: e.total ? Math.floor((e.done * 100) / e.total) : 0 };
+    }).then((u) => unsubs.push(u));
     onFileDrop(startImport, (on) => (app.dragging = on)).then((u) => unsubs.push(u));
 
     const keys = (e: KeyboardEvent) => {
-      if ((e.ctrlKey && (e.key === "f" || e.key === "l")) || (e.key === "/" && document.activeElement?.tagName !== "INPUT")) {
+      if (e.ctrlKey && e.key === "f" && app.current && reader) {
+        e.preventDefault();
+        reader.openFind();
+      } else if ((e.ctrlKey && (e.key === "f" || e.key === "l" || e.key === "k")) || (e.key === "/" && document.activeElement?.tagName !== "INPUT")) {
         e.preventDefault();
         show("search");
       } else if (e.altKey && e.key === "ArrowLeft" && app.current?.prev) {
@@ -97,7 +104,7 @@
     {:else if app.view === "settings"}
       <SettingsView />
     {:else}
-      <Reader />
+      <Reader bind:this={reader} />
     {/if}
   </main>
   {#if app.dragging}

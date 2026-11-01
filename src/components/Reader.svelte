@@ -3,7 +3,7 @@
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
   import { mediaBase } from "../lib/api";
-  import { adaptHtml, logicalStyles } from "../lib/layout";
+  import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
 
@@ -49,6 +49,52 @@
   const siblings = $derived(
     entry ? app.hits.filter((h) => h.expression === entry.expression && h.termId !== entry.termId) : [],
   );
+
+  // Find in entry (Ctrl+F) and the highlight of the searched text.
+  let findOpen = $state(false);
+  let findText = $state("");
+  let findInput: HTMLInputElement | undefined = $state();
+  let findMarks: HTMLElement[] = [];
+  let findIndex = $state(0);
+  let findCount = $state(0);
+
+  export function openFind() {
+    findOpen = true;
+    queueMicrotask(() => findInput?.select());
+  }
+
+  function closeFind() {
+    findOpen = false;
+    findText = "";
+  }
+
+  function showFind(i: number) {
+    if (findMarks.length === 0) return;
+    findIndex = (i + findMarks.length) % findMarks.length;
+    findMarks.forEach((m, j) => m.classList.toggle("current", j === findIndex));
+    findMarks[findIndex].scrollIntoView({ block: "center", inline: "center" });
+  }
+
+  function findKey(e: KeyboardEvent) {
+    if (e.key === "Enter") showFind(findIndex + (e.shiftKey ? -1 : 1));
+    else if (e.key === "Escape") closeFind();
+  }
+
+  $effect(() => {
+    body.html;
+    const query = findOpen && findText ? findText : app.highlight;
+    const fromFind = findOpen && !!findText;
+    if (!scroller) return;
+    queueMicrotask(() => {
+      const root = scroller!.querySelector<HTMLElement>(".entry");
+      if (!root) return;
+      clearMarks(root, "nj-hit");
+      findMarks = query ? markText(root, query, "nj-hit") : [];
+      findCount = findMarks.length;
+      findIndex = 0;
+      if (findMarks.length && (fromFind || app.highlight)) showFind(0);
+    });
+  });
 
   $effect(() => {
     // Horizontal symbol runs (＊＊, ←→) in vertical text must fit the column like 縦中横.
@@ -167,6 +213,20 @@
         {/if}
       </div>
       <div class="actions">
+        {#if findOpen}
+          <div class="find">
+            <input
+              bind:this={findInput}
+              bind:value={findText}
+              onkeydown={findKey}
+              placeholder={t("findInEntry")}
+              aria-label={t("findInEntry")} />
+            <span class="find-count">{findText ? `${findCount ? findIndex + 1 : 0}/${findCount}` : ""}</span>
+            <button class="icon" title={t("close")} onclick={closeFind}><Icon name="close" size={14} /></button>
+          </div>
+        {:else}
+          <button class="icon" title={t("findInEntry")} onclick={openFind}><Icon name="search" /></button>
+        {/if}
         <button class="icon" title={t("fontSize")} onclick={() => size(-2)}><Icon name="textSmaller" /></button>
         <button class="icon" title={t("fontSize")} onclick={() => size(2)}><Icon name="textLarger" /></button>
         <button class="icon" title={t("toggleDirection")} aria-pressed={vertical} onclick={toggleDirection}>
@@ -489,6 +549,39 @@
   .vertical .entry-body :global(.sc-img-inline) {
     /* Label images (表記, 派生…) are drawn for horizontal text; keep them upright and sized to the line. */
     writing-mode: horizontal-tb;
+  }
+  .entry :global(mark.nj-hit) {
+    background: var(--highlight, rgba(255, 214, 10, 0.45));
+    color: inherit;
+    border-radius: 2px;
+  }
+  .entry :global(mark.nj-hit.current) {
+    background: var(--highlight-current, rgba(255, 149, 0, 0.75));
+  }
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--divider-strong);
+    border-radius: 6px;
+    padding: 0 2px 0 8px;
+    background: var(--surface, transparent);
+  }
+  .find input {
+    width: 88px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+    padding: 3px 0;
+  }
+  .find-count {
+    font-size: 11.5px;
+    color: var(--text-2);
+    min-width: 2.5em;
+    text-align: right;
   }
   .entry-body :global(.nj-turn) {
     display: inline-block;

@@ -7,6 +7,7 @@ use neojp_core::{
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
@@ -42,6 +43,61 @@ struct ImportEvent {
     finished: bool,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IndexEvent {
+    dict_id: i64,
+    title: String,
+    done: usize,
+    total: usize,
+    finished: bool,
+}
+
+static INDEXING: AtomicBool = AtomicBool::new(false);
+static INDEX_AGAIN: AtomicBool = AtomicBool::new(false);
+
+/// Build the full-text index for every dictionary that lacks one, on a background thread.
+fn spawn_indexer(app: AppHandle) {
+    if INDEXING.swap(true, Ordering::SeqCst) {
+        INDEX_AGAIN.store(true, Ordering::SeqCst);
+        return;
+    }
+    std::thread::spawn(move || {
+        let db_path = app.state::<AppState>().db_path.clone();
+        loop {
+            INDEX_AGAIN.store(false, Ordering::SeqCst);
+            if let Ok(lib) = Library::open(&db_path) {
+                let store = EpwingStore::default();
+                for id in lib.fulltext_pending().unwrap_or_default() {
+                    let Ok(d) = lib.dictionary(id) else { continue };
+                    let mut last = std::time::Instant::now();
+                    let _ = lib.build_fulltext(&d, Some(&store), |done, total| {
+                        if last.elapsed().as_millis() > 300 {
+                            last = std::time::Instant::now();
+                            let _ = app.emit("index-progress", IndexEvent {
+                                dict_id: d.id, title: d.title.clone(), done, total, finished: false,
+                            });
+                        }
+                        true
+                    });
+                    let _ = app.emit("index-progress", IndexEvent {
+                        dict_id: d.id, title: d.title.clone(), done: 0, total: 0, finished: true,
+                    });
+                }
+            }
+            if !INDEX_AGAIN.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        INDEXING.store(false, Ordering::SeqCst);
+    });
+}
+
+#[tauri::command]
+fn fulltext_ready(state: State<AppState>) -> CmdResult<Vec<i64>> {
+    state.lib.lock().unwrap().fulltext_ready().map_err(err)
+}
+
 #[tauri::command]
 fn list_dictionaries(state: State<AppState>) -> CmdResult<Vec<DictionaryInfo>> {
     state.lib.lock().unwrap().dictionaries().map_err(err)
@@ -49,7 +105,7 @@ fn list_dictionaries(state: State<AppState>) -> CmdResult<Vec<DictionaryInfo>> {
 
 #[tauri::command]
 fn search(state: State<AppState>, query: SearchQuery) -> CmdResult<Vec<SearchHit>> {
-    state.lib.lock().unwrap().search(&query).map_err(err)
+    state.lib.lock().unwrap().search_with(&query, Some(&state.epwing)).map_err(err)
 }
 
 #[tauri::command]
@@ -161,6 +217,7 @@ fn import_dictionaries(app: AppHandle, state: State<AppState>, paths: Vec<String
                 finished: true,
             });
         }
+        spawn_indexer(app.clone());
     });
     Ok(())
 }
@@ -283,10 +340,12 @@ pub fn run() {
             let db_path = dir.join("library.sqlite3");
             let lib = Library::open(&db_path).map_err(|e| e.to_string())?;
             app.manage(AppState { lib: Mutex::new(lib), db_path, epwing: EpwingStore::default() });
+            spawn_indexer(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_dictionaries,
+            fulltext_ready,
             search,
             get_entry,
             get_entry_at,

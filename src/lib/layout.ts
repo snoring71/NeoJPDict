@@ -146,3 +146,60 @@ export function adaptHtml(html: string, vertical: boolean): string {
   }
   return root.innerHTML;
 }
+
+// ---- Highlighting -------------------------------------------------------
+
+const foldChar = (c: string) => {
+  const code = c.charCodeAt(0);
+  if (code >= 0x30a1 && code <= 0x30f6) return String.fromCharCode(code - 0x60); // katakana → hiragana
+  if (code >= 0xff01 && code <= 0xff5e) return String.fromCharCode(code - 0xfee0).toLowerCase(); // full-width ASCII
+  return c.toLowerCase();
+};
+const foldText = (s: string) => Array.from(s, foldChar).join("");
+
+/** Remove highlight marks of class `cls` added earlier. */
+export function clearMarks(root: HTMLElement, cls: string) {
+  for (const m of Array.from(root.querySelectorAll(`mark.${cls}`))) {
+    m.replaceWith(document.createTextNode(m.textContent ?? ""));
+  }
+  root.normalize();
+}
+
+/**
+ * Wrap every occurrence of `needle` (kana- and width-insensitive) in `<mark class=cls>`.
+ * Returns the marks in document order.
+ */
+export function markText(root: HTMLElement, needle: string, cls: string): HTMLElement[] {
+  const want = foldText(needle.trim());
+  if (!want) return [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) =>
+      n.parentElement?.closest("rt, svg, style, script, mark") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+  const marks: HTMLElement[] = [];
+  for (const node of nodes) {
+    const text = node.data;
+    // Folding keeps one UTF-16 unit per unit for the scripts involved, so indices line up.
+    const folded = foldText(text);
+    if (folded.length !== text.length) continue;
+    let at = folded.indexOf(want);
+    if (at < 0) continue;
+    let cur: Text = node;
+    let offset = 0;
+    while (at >= 0) {
+      const hit = cur.splitText(at - offset);
+      const rest = hit.splitText(want.length);
+      const mark = document.createElement("mark");
+      mark.className = cls;
+      hit.replaceWith(mark);
+      mark.append(hit);
+      marks.push(mark);
+      offset = at + want.length;
+      cur = rest;
+      at = folded.indexOf(want, offset);
+    }
+  }
+  return marks;
+}

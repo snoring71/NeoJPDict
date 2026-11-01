@@ -163,6 +163,12 @@ pub enum MatchMode {
     Prefix,
     Suffix,
     Contains,
+    /// Anywhere in an entry's text (needs the full-text index).
+    FullText,
+    /// Phrase headwords (慣用句) that contain the query, such as 手を焼く for 手.
+    Idiom,
+    /// Example sentences (用例, text in 「」) that contain the query.
+    Example,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -267,6 +273,8 @@ impl Library {
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
         )?;
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(crate::fulltext::SCHEMA)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self { conn })
     }
@@ -358,6 +366,7 @@ impl Library {
 
     pub fn delete_dictionary(&self, id: i64) -> Result<()> {
         // Delete children explicitly in chunks-friendly statements; cascades are slow on big tables.
+        self.fulltext_forget(id)?;
         let tx = self.conn.unchecked_transaction()?;
         for table in ["terms", "term_meta", "tags", "media"] {
             tx.execute(&format!("DELETE FROM {table} WHERE dict_id=?1"), [id])?;
@@ -478,6 +487,11 @@ impl Library {
     // ---------------------------------------------------------------- search
 
     pub fn search(&self, q: &SearchQuery) -> Result<Vec<SearchHit>> {
+        self.search_with(q, None)
+    }
+
+    /// Like `search`, with a body loader so example search can read EPWING entries.
+    pub fn search_with(&self, q: &SearchQuery, external: Option<&dyn ExternalBodies>) -> Result<Vec<SearchHit>> {
         let key = kana::search_key(q.text.trim());
         if key.is_empty() {
             return Ok(vec![]);
@@ -513,7 +527,38 @@ impl Library {
             }
         };
 
-        let (sql_cond, arg) = match q.mode {
+        if matches!(q.mode, MatchMode::FullText | MatchMode::Example) {
+            let Some(expr) = crate::fulltext::match_expr(q.text.trim()) else { return Ok(vec![]) };
+            let fetch = if q.mode == MatchMode::Example { q.limit.max(100) * 8 } else { q.limit * 4 };
+            let sql = format!(
+                "SELECT t.id, t.dict_id, t.expression, t.reading, t.expr_key, t.reading_key, t.score
+                 FROM fts JOIN terms t ON t.id = fts.rowid
+                 WHERE fts MATCH ?1 AND +t.dict_id IN ({id_list}) LIMIT {fetch}"
+            );
+            let mut st = self.conn.prepare_cached(&sql)?;
+            let rows = st
+                .query_map([&expr], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let rows = if q.mode == MatchMode::Example {
+                let dicts: std::collections::HashMap<i64, &DictionaryInfo> = enabled.iter().map(|d| (d.id, d)).collect();
+                rows.into_iter()
+                    .filter(|row| self.has_example(row.0, dicts[&row.1], &key, external))
+                    .collect()
+            } else {
+                rows
+            };
+            push(rows, 0, None, &mut hits);
+            let order: std::collections::HashMap<i64, usize> =
+                enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
+            hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
+            return Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect());
+        }
+
+        // Wildcards: * for any run of characters, ? for exactly one.
+        let wildcard = key.contains(['*', '?']);
+        let (sql_cond, arg) = if wildcard {
+            ("(expr_key GLOB ?1 OR reading_key GLOB ?1)", key.replace(['[', ']'], ""))
+        } else { match q.mode {
             MatchMode::Exact => ("(expr_key = ?1 OR reading_key = ?1)", key.clone()),
             MatchMode::Prefix => (
                 "((expr_key >= ?1 AND expr_key < ?2) OR (reading_key >= ?1 AND reading_key < ?2))",
@@ -530,7 +575,15 @@ impl Library {
                 "(instr(expr_key, ?1) > 0 OR instr(reading_key, ?1) > 0)",
                 key.clone(),
             ),
-        };
+            MatchMode::Idiom => (
+                "((instr(expr_key, ?1) > 0 OR instr(reading_key, ?1) > 0) AND max(length(expr_key), length(reading_key)) >= length(?1) + 2 AND kind = 'term'
+                  AND (instr(expr_key, 'を') + instr(expr_key, 'に') + instr(expr_key, 'が') + instr(expr_key, 'の')
+                     + instr(expr_key, 'も') + instr(expr_key, 'は') + instr(expr_key, 'と') + instr(expr_key, 'で')
+                     + instr(expr_key, 'ば') + instr(expr_key, 'ぬ') + instr(expr_key, 'ず') + instr(expr_key, 'へ')) > 0)",
+                key.clone(),
+            ),
+            MatchMode::FullText | MatchMode::Example => unreachable!(),
+        } };
         let rows = self.query_terms(sql_cond, &arg, &id_list, q.limit)?;
         // A dictionary that has the query itself as a headword doesn't also get guesses
         // from conjugation (かける should not list かく as "potential" under it).
@@ -538,7 +591,7 @@ impl Library {
             rows.iter().filter(|r| r.4 == key || r.5 == key).map(|r| r.1).collect();
         push(rows, 0, None, &mut hits);
 
-        if q.deinflect && matches!(q.mode, MatchMode::Exact | MatchMode::Prefix) {
+        if q.deinflect && !wildcard && matches!(q.mode, MatchMode::Exact | MatchMode::Prefix) {
             for cand in crate::deinflect::deinflect(&key) {
                 if cand.term == key {
                     continue;
@@ -560,6 +613,41 @@ impl Library {
             enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
         hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
         Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect())
+    }
+
+    /// Does the entry have an example (text in 「」 or『』) containing `key`? A dash standing
+    /// for the headword (「━を引く」) counts as the headword.
+    fn has_example(&self, term_id: i64, dict: &DictionaryInfo, key: &str, external: Option<&dyn ExternalBodies>) -> bool {
+        let Ok((expression, reading, body, locator)) = self.conn.query_row(
+            "SELECT expression, reading, body, locator FROM terms WHERE id=?1",
+            [term_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
+        ) else {
+            return false;
+        };
+        let html = if body.is_empty() && !locator.is_empty() {
+            match external.map(|e| e.body(dict, &locator)) {
+                Some(Ok(h)) => h,
+                _ => return false,
+            }
+        } else {
+            body
+        };
+        let text = crate::fulltext::html_text(&html);
+        let mut rest = text.as_str();
+        while let Some(open) = rest.find(['「', '『']) {
+            let after = &rest[open + 3..];
+            let close = after.find(['」', '』']).unwrap_or(after.len());
+            let quote = &after[..close];
+            for stand_in in [expression.as_str(), reading.as_str()] {
+                let filled = quote.replace(['━', '─', '―', '—', '〜', '～'], stand_in);
+                if kana::search_key(&filled).contains(key) {
+                    return true;
+                }
+            }
+            rest = &after[close.min(after.len())..];
+        }
+        false
     }
 
     /// Could this term be the base form that `cand` was deinflected to?

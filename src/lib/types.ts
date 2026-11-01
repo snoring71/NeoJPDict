@@ -1,4 +1,5 @@
-export type MatchMode = "exact" | "prefix" | "suffix" | "contains";
+export type HeadwordMode = "exact" | "prefix" | "suffix" | "contains";
+export type MatchMode = HeadwordMode | "fullText" | "idiom" | "example";
 export type WritingMode = "auto" | "vertical" | "horizontal";
 
 export interface DictionaryInfo {

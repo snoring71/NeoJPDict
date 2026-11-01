@@ -68,7 +68,16 @@ export const mockApi = {
     };
     const order = new Map(d.dictionaries.map((x, i) => [x.id, i]));
     return d.entries
-      .filter((e) => (query.dictIds.length === 0 || query.dictIds.includes(e.dictId)) && (test(e.expression) || test(e.reading)))
+      .filter((e) => query.dictIds.length === 0 || query.dictIds.includes(e.dictId))
+      .filter((e) => {
+        const text = () => key(e.html.replace(/<rt>.*?<\/rt>/g, "").replace(/<[^>]+>/g, ""));
+        switch (query.mode) {
+          case "fullText": return text().includes(q);
+          case "example": return (text().match(/「[^」]*」/g) ?? []).some((x) => x.includes(q));
+          case "idiom": return (key(e.expression).includes(q) || key(e.reading).includes(q)) && Math.max(e.expression.length, e.reading.length) >= q.length + 2 && /[をにがのもはとでばぬずへ]/.test(e.expression);
+          default: return test(e.expression) || test(e.reading);
+        }
+      })
       .sort((a, b) => (order.get(a.dictId)! - order.get(b.dictId)!) || a.reading.length - b.reading.length)
       .slice(0, query.limit)
       .map(toHit);

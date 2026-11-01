@@ -2,7 +2,7 @@
   import { app } from "../lib/store.svelte";
   import { t } from "../lib/i18n";
   import { api } from "../lib/api";
-  import type { MatchMode } from "../lib/types";
+  import type { HeadwordMode } from "../lib/types";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
   import ResultList from "./ResultList.svelte";
@@ -11,7 +11,7 @@
   let recentOpen = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const modes: MatchMode[] = ["prefix", "exact", "suffix", "contains"];
+  const modes: HeadwordMode[] = ["prefix", "exact", "suffix", "contains"];
 
   function typed() {
     clearTimeout(timer);
@@ -23,7 +23,9 @@
     app.runSearch();
   }
 
-  function setTarget(t: "headwords" | "kanji") {
+  const targets = ["headwords", "idioms", "examples", "fulltext", "kanji"] as const;
+
+  function setTarget(t: (typeof targets)[number]) {
     app.target = t;
     app.runSearch();
   }
@@ -97,12 +99,18 @@
     </div>
 
     <div class="mode-row">
-      <button class="mode" title={t(app.matchMode)} onclick={cycleMode}>{t(app.matchMode)}</button>
+      {#if app.target === "headwords" || app.target === "kanji"}
+        <button class="mode" title={t(app.matchMode)} onclick={cycleMode}>{t(app.matchMode)}</button>
+      {/if}
       <div class="segmented" role="tablist">
-        <button role="tab" aria-selected={app.target === "headwords"} class:active={app.target === "headwords"} onclick={() => setTarget("headwords")}>{t("headwords")}</button>
-        <button role="tab" aria-selected={app.target === "kanji"} class:active={app.target === "kanji"} onclick={() => setTarget("kanji")}>{t("kanji")}</button>
+        {#each targets as tg}
+          <button role="tab" aria-selected={app.target === tg} class:active={app.target === tg} onclick={() => setTarget(tg)}>{t(tg)}</button>
+        {/each}
       </div>
     </div>
+    {#if app.indexing && (app.target === "fulltext" || app.target === "examples")}
+      <div class="note">{t("fulltextIndexing", { title: app.indexing.title, pct: app.indexing.pct })}</div>
+    {/if}
 
     {#if app.groups.length > 0}
       <div class="groups" role="tablist">
@@ -265,8 +273,14 @@
     border-radius: 6px;
     overflow: hidden;
   }
+  .note {
+    padding: 0 12px 8px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
   .segmented button {
     flex: 1;
+    white-space: nowrap;
     border: 0;
     background: transparent;
     color: var(--accent-text);
