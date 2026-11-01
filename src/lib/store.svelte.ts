@@ -15,6 +15,15 @@ interface Place {
 const samePlace = (a: Place, b: Place) =>
   a.dictId === b.dictId && (a.termId ? a.termId === b.termId : a.locator === b.locator);
 
+function loadRecent(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem("neojpdict.recent") ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 30) : [];
+  } catch {
+    return [];
+  }
+}
+
 class AppStore {
   view: View = $state("search");
   dictionaries: DictionaryInfo[] = $state([]);
@@ -32,7 +41,7 @@ class AppStore {
   directionOverride: "vertical" | "horizontal" | null = $state(null);
   history: HistoryItem[] = $state([]);
   bookmarks: HistoryItem[] = $state([]);
-  recentQueries: string[] = $state([]);
+  recentQueries: string[] = $state(loadRecent());
   imports: Record<string, ImportEvent> = $state({});
   dragging = $state(false);
   browseDict: number | null = $state(null);
@@ -111,6 +120,9 @@ class AppStore {
     const q = this.query.trim();
     if (!q) return;
     this.recentQueries = [q, ...this.recentQueries.filter((x) => x !== q)].slice(0, 30);
+    try {
+      localStorage.setItem("neojpdict.recent", JSON.stringify(this.recentQueries));
+    } catch {}
   }
 
   /** Note that `next` is now on screen, keeping where we were for Back. */
@@ -187,6 +199,8 @@ class AppStore {
     const v = await api.getEntry(hit.termId, record);
     this.current = v;
     this.arrive(this.placeOf(v), auto);
+    // Choosing a result is when a search counts as done: remember it.
+    if (!auto && this.view === "search") this.rememberQuery();
   }
 
   async openTerm(termId: number, record = true) {
