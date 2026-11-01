@@ -32,14 +32,16 @@
 
   /** Split off the first line when the entry already starts with its own headword (common in 国語辞典). */
   const body = $derived.by(() => {
-    if (!entry) return { head: "", html: "" };
+    if (!entry) return { head: "", html: "", own: false };
     const html = entry.html.replaceAll("nj-media:", mediaBase());
+    // EPWING text starts with its own headline, so no separate heading is drawn.
+    if (html.startsWith('<div class="ep">')) return { head: "", html, own: true };
     const m = html.match(/^(<div class="gloss(?: sc)?">)([^<]{1,80}?【[^<]{1,60}?】[^<]{0,40}?)(<br>|<\/div>)/);
     if (m) {
       const rest = m[3] === "<br>" ? m[1] + html.slice(m[0].length) : html.slice(m[1].length + m[2].length);
-      return { head: m[2], html: rest };
+      return { head: m[2], html: rest, own: false };
     }
-    return { head: "", html };
+    return { head: "", html, own: false };
   });
 
   // Other dictionaries in the current results that have the same headword.
@@ -71,6 +73,8 @@
     e.preventDefault();
     const q = a.getAttribute("data-query");
     if (q) app.searchFor(q);
+    const ep = a.getAttribute("data-ep");
+    if (ep && entry) app.openAt(entry.dictId, ep);
   }
 
   function size(d: number) {
@@ -164,7 +168,9 @@
       onwheel={wheel}
       onclick={click}>
       <article class="entry" lang="ja">
-        {#if body.head}
+        {#if body.own}
+          <!-- headline is part of the entry text -->
+        {:else if body.head}
           <h1 class="headword">{body.head}</h1>
         {:else}
           <h1 class="headword">
@@ -391,6 +397,53 @@
   .entry-body :global(.entry-hw) {
     font-weight: 700;
     font-size: 1.12em;
+  }
+  /* EPWING text */
+  .entry-body :global(.ep-l) {
+    min-height: 0.5em;
+  }
+  .entry-body :global(.ep-kw) {
+    font-weight: 700;
+  }
+  .entry-body :global(.ep-l:first-child .ep-kw) {
+    font-size: 1.12em;
+  }
+  .entry-body :global(.ep-deco-1) {
+    font-style: italic;
+  }
+  .entry-body :global(.ep-deco-3) {
+    font-weight: 700;
+  }
+  .entry-body :global(.ep-gaiji) {
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.12em;
+  }
+  .entry-body :global(.ep-gaiji.narrow) {
+    width: 0.5em;
+  }
+  .vertical .entry-body :global(.ep-gaiji) {
+    vertical-align: baseline;
+  }
+  .entry-body :global(.ep-img.inline) {
+    height: 1em;
+    vertical-align: -0.12em;
+  }
+  .vertical .entry-body :global(.ep-img.inline) {
+    height: auto;
+    width: 1em;
+  }
+  .entry-body :global(.ep-img:not(.inline)) {
+    display: block;
+    max-width: 100%;
+    margin: 0.5em 0;
+  }
+  .entry-body :global(a.ep-ref) {
+    color: var(--link);
+    text-decoration: none;
+  }
+  .entry-body :global(sup) {
+    font-size: 0.55em;
   }
   .entry-body :global(.gloss-list) {
     margin: 0;

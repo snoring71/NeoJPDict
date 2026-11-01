@@ -93,6 +93,15 @@ class AppStore {
     this.selected = { termId, dictId: e.dictId, expression: e.expression, reading: e.reading, deinflection: null };
   }
 
+  /** Follow an EPWING cross-reference to another position in the same book. */
+  async openAt(dictId: number, locator: string) {
+    const v = await api.getEntryAt(dictId, locator);
+    this.current = v;
+    this.directionOverride = null;
+    const e = v.entry;
+    this.selected = e.termId ? { termId: e.termId, dictId, expression: e.expression, reading: e.reading, deinflection: null } : null;
+  }
+
   async searchFor(text: string) {
     this.view = "search";
     this.query = text;

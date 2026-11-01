@@ -91,6 +91,11 @@ export const mockApi = {
       writingMode: dict.writingMode,
     };
   },
+  async get_entry_at({ dictId }: any): Promise<EntryView> {
+    const d = await data();
+    const e = d.entries.find((x) => x.dictId === dictId)!;
+    return mockApi.get_entry({ termId: e.termId, record: false });
+  },
   async browse({ dictId, limit }: any) {
     const d = await data();
     return d.entries.filter((e) => e.dictId === dictId).slice(0, limit).map(toHit);

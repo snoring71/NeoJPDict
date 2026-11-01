@@ -56,6 +56,7 @@ CREATE INDEX IF NOT EXISTS terms_reading ON terms(reading_key);
 CREATE INDEX IF NOT EXISTS terms_expr_rev    ON terms(expr_rev);
 CREATE INDEX IF NOT EXISTS terms_reading_rev ON terms(reading_rev);
 CREATE INDEX IF NOT EXISTS terms_browse  ON terms(dict_id, sort_key, id);
+CREATE INDEX IF NOT EXISTS terms_locator ON terms(dict_id, locator) WHERE locator != '';
 
 CREATE TABLE IF NOT EXISTS term_meta (
     dict_id    INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE,
@@ -120,6 +121,8 @@ pub struct DictionaryInfo {
     pub term_count: i64,
     pub meta_count: i64,
     pub kanji_count: i64,
+    /// Where the dictionary was imported from (the book folder for EPWING).
+    pub source_path: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -245,6 +248,7 @@ pub struct Library {
 /// Body loader for dictionaries whose entries live outside SQLite (EPWING).
 pub trait ExternalBodies {
     fn body(&self, dict: &DictionaryInfo, locator: &str) -> Result<String>;
+    fn media(&self, dict: &DictionaryInfo, path: &str) -> Result<Option<Vec<u8>>>;
 }
 
 impl Library {
@@ -273,7 +277,7 @@ impl Library {
     pub fn dictionaries(&self) -> Result<Vec<DictionaryInfo>> {
         let mut st = self.conn.prepare(
             "SELECT id, kind, title, revision, author, description, attribution, url, group_name,
-                    sort_order, enabled, writing_mode, term_count, meta_count, kanji_count
+                    sort_order, enabled, writing_mode, term_count, meta_count, kanji_count, source_path
              FROM dictionaries ORDER BY sort_order, id",
         )?;
         let rows = st.query_map([], |r| {
@@ -293,6 +297,7 @@ impl Library {
                 term_count: r.get(12)?,
                 meta_count: r.get(13)?,
                 kanji_count: r.get(14)?,
+                source_path: r.get(15)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -663,6 +668,41 @@ impl Library {
             frequencies,
             pitches,
             bookmarked,
+        })
+    }
+
+    /// The entry at a position inside a dictionary (EPWING cross-references).
+    /// Uses the indexed headword when one starts there, otherwise a bare entry.
+    pub fn entry_at(&self, dict_id: i64, locator: &str, external: Option<&dyn ExternalBodies>) -> Result<Entry> {
+        let found: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM terms WHERE dict_id=?1 AND locator=?2 AND locator != '' ORDER BY id LIMIT 1",
+                params![dict_id, locator],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = found {
+            return self.entry(id, external);
+        }
+        let dict = self.dictionary(dict_id)?;
+        let html = match external {
+            Some(ext) => ext.body(&dict, locator)?,
+            None => String::new(),
+        };
+        Ok(Entry {
+            term_id: 0,
+            dict_id,
+            dict_title: dict.title,
+            kind: "term".into(),
+            expression: String::new(),
+            reading: String::new(),
+            tags: vec![],
+            html,
+            styles: String::new(),
+            frequencies: vec![],
+            pitches: vec![],
+            bookmarked: false,
         })
     }
 

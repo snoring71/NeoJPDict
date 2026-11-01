@@ -1,6 +1,7 @@
 //! NeoJPDict core: dictionary import, indexing and search, independent of the UI.
 
 pub mod deinflect;
+pub mod epwing;
 pub mod error;
 pub mod html;
 pub mod kana;

@@ -24,6 +24,7 @@ export const api = {
   listDictionaries: () => call<DictionaryInfo[]>("list_dictionaries"),
   search: (query: SearchQuery) => call<SearchHit[]>("search", { query }),
   getEntry: (termId: number, record = true) => call<EntryView>("get_entry", { termId, record }),
+  getEntryAt: (dictId: number, locator: string) => call<EntryView>("get_entry_at", { dictId, locator }),
   browse: (dictId: number, after: string | null, limit = 200) =>
     call<SearchHit[]>("browse", { dictId, after, limit }),
   history: (limit = 500) => call<HistoryItem[]>("history", { limit }),

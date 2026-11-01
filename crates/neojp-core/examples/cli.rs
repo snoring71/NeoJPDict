@@ -1,6 +1,6 @@
 //! Developer tool: `cargo run --release --example cli -- <library.db> import <file.zip>`
 //! or `... <library.db> search <text> [exact|prefix|suffix|contains]`.
-use neojp_core::{Library, MatchMode, SearchQuery, yomitan};
+use neojp_core::{Library, MatchMode, SearchQuery, epwing, yomitan};
 
 fn main() -> neojp_core::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -9,10 +9,15 @@ fn main() -> neojp_core::Result<()> {
         "import" => {
             for path in &args[3..] {
                 let t = std::time::Instant::now();
-                let id = yomitan::import(&lib, path, |p| {
+                let show = |p: &yomitan::ImportProgress| {
                     eprint!("\r{} {} {}/{}      ", p.title, p.stage, p.done, p.total);
                     true
-                })?;
+                };
+                let id = if path.ends_with(".zip") {
+                    yomitan::import(&lib, path, show)?
+                } else {
+                    epwing::import(&lib, std::path::Path::new(path), show)?[0]
+                };
                 eprintln!("\nimported as {id} in {:.1?}", t.elapsed());
             }
         }
@@ -30,9 +35,15 @@ fn main() -> neojp_core::Result<()> {
                 println!("[{}] {} 【{}】 {:?}", h.dict_id, h.reading, h.expression, h.deinflection);
             }
             if let Some(h) = hits.first() {
-                let e = lib.entry(h.term_id, None)?;
-                println!("--- {}\n{}\nfreq: {:?}\npitch: {:?}", e.dict_title, &e.html.chars().take(600).collect::<String>(), e.frequencies, e.pitches);
+                let store = epwing::EpwingStore::default();
+                let e = lib.entry(h.term_id, Some(&store))?;
+                println!("--- {}\n{}\nfreq: {:?}\npitch: {:?}", e.dict_title, &e.html.chars().take(1500).collect::<String>(), e.frequencies, e.pitches);
             }
+        }
+        "entry" => {
+            let store = epwing::EpwingStore::default();
+            let e = lib.entry(args[3].parse().unwrap(), Some(&store))?;
+            println!("{} {} {}\n{}", e.dict_title, e.reading, e.expression, e.html);
         }
         "list" => {
             for d in lib.dictionaries()? {
