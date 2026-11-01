@@ -18,6 +18,10 @@ export interface DictionaryInfo {
   termCount: number;
   metaCount: number;
   kanjiCount: number;
+  /** The imported title, when `title` is a name the user gave the dictionary. */
+  originalTitle: string;
+  /** Entry font: '' (app default), 'mincho', 'gothic' or a font family name. */
+  font: string;
 }
 
 export interface SearchQuery {

@@ -11,6 +11,7 @@ interface Fixture {
 const sampleDict = (id: number, title: string, groupName: string): DictionaryInfo => ({
   id, kind: "yomitan", title, revision: "1", author: "", description: "", attribution: "", url: "",
   groupName, sortOrder: id, enabled: true, writingMode: "auto", termCount: 2, metaCount: 0, kanjiCount: 0,
+  originalTitle: title, font: "",
 });
 
 const sample: Fixture = {
@@ -149,6 +150,12 @@ export const mockApi = {
   async update_dictionary({ id, enabled, groupName, writingMode }: any) {
     const d = await data();
     Object.assign(d.dictionaries.find((x) => x.id === id)!, { enabled, groupName, writingMode });
+  },
+  async update_dictionary_display({ id, alias, font }: any) {
+    const d = (await data()).dictionaries.find((x) => x.id === id)!;
+    d.originalTitle ??= d.title;
+    d.title = alias.trim() || d.originalTitle;
+    d.font = font;
   },
   async reorder_dictionaries({ ids }: any) {
     const d = await data();

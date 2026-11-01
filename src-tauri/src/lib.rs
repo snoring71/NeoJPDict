@@ -213,6 +213,11 @@ fn update_dictionary(
 }
 
 #[tauri::command]
+fn update_dictionary_display(state: State<AppState>, id: i64, alias: String, font: String) -> CmdResult<()> {
+    state.lib.lock().unwrap().update_dictionary_display(id, &alias, &font).map_err(err)
+}
+
+#[tauri::command]
 fn reorder_dictionaries(state: State<AppState>, ids: Vec<i64>) -> CmdResult<()> {
     state.lib.lock().unwrap().reorder_dictionaries(&ids).map_err(err)
 }
@@ -395,6 +400,7 @@ pub fn run() {
             delete_dictionary,
             update_dictionary,
             reorder_dictionaries,
+            update_dictionary_display,
             import_dictionaries,
         ])
         .run(tauri::generate_context!())

@@ -124,6 +124,10 @@ pub struct DictionaryInfo {
     pub kanji_count: i64,
     /// Where the dictionary was imported from (the book folder for EPWING).
     pub source_path: String,
+    /// The title the dictionary was imported with; `title` is the name the user gave it, if any.
+    pub original_title: String,
+    /// Font family for entry text ('' = the app default).
+    pub font: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -293,6 +297,16 @@ impl Library {
         if !has_views {
             conn.execute_batch("ALTER TABLE history ADD COLUMN views INTEGER NOT NULL DEFAULT 1")?;
         }
+        // Per-dictionary display name and font (added later).
+        let has_alias: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('dictionaries') WHERE name='alias'")?
+            .exists([])?;
+        if !has_alias {
+            conn.execute_batch(
+                "ALTER TABLE dictionaries ADD COLUMN alias TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE dictionaries ADD COLUMN font TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self { conn })
     }
@@ -321,8 +335,9 @@ impl Library {
 
     pub fn dictionaries(&self) -> Result<Vec<DictionaryInfo>> {
         let mut st = self.conn.prepare(
-            "SELECT id, kind, title, revision, author, description, attribution, url, group_name,
-                    sort_order, enabled, writing_mode, term_count, meta_count, kanji_count, source_path
+            "SELECT id, kind, CASE WHEN alias != '' THEN alias ELSE title END, revision, author, description,
+                    attribution, url, group_name, sort_order, enabled, writing_mode, term_count, meta_count,
+                    kanji_count, source_path, title, font
              FROM dictionaries ORDER BY sort_order, id",
         )?;
         let rows = st.query_map([], |r| {
@@ -343,6 +358,8 @@ impl Library {
                 meta_count: r.get(13)?,
                 kanji_count: r.get(14)?,
                 source_path: r.get(15)?,
+                original_title: r.get(16)?,
+                font: r.get(17)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -428,6 +445,18 @@ impl Library {
         self.conn.execute(
             "UPDATE dictionaries SET enabled=?2, group_name=?3, writing_mode=?4 WHERE id=?1",
             params![id, enabled as i64, group_name, mode],
+        )?;
+        Ok(())
+    }
+
+    /// Give a dictionary a display name ('' restores the imported title) and an entry font.
+    pub fn update_dictionary_display(&self, id: i64, alias: &str, font: &str) -> Result<()> {
+        let alias = alias.trim();
+        let original: String = self.conn.query_row("SELECT title FROM dictionaries WHERE id=?1", [id], |r| r.get(0))?;
+        let alias = if alias == original { "" } else { alias };
+        self.conn.execute(
+            "UPDATE dictionaries SET alias=?2, font=?3 WHERE id=?1",
+            params![id, alias, font.trim()],
         )?;
         Ok(())
     }
@@ -943,7 +972,7 @@ impl Library {
 
     fn meta_for(&self, expression: &str, reading: &str) -> Result<(Vec<MetaInfo>, Vec<MetaInfo>)> {
         let mut st = self.conn.prepare_cached(
-            "SELECT d.title, m.mode, m.data FROM term_meta m JOIN dictionaries d ON d.id = m.dict_id
+            "SELECT CASE WHEN d.alias != '' THEN d.alias ELSE d.title END, m.mode, m.data FROM term_meta m JOIN dictionaries d ON d.id = m.dict_id
              WHERE m.expression=?1 AND d.enabled=1 ORDER BY d.sort_order",
         )?;
         let rows = st.query_map([expression], |r| {
@@ -1125,5 +1154,23 @@ impl Library {
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_and_font() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib.insert_dictionary(&NewDictionary { kind: "yomitan".into(), title: "大辞林 第四版".into(), ..Default::default() }).unwrap();
+        lib.update_dictionary_display(id, " 大辞林 ", "gothic").unwrap();
+        let d = lib.dictionary(id).unwrap();
+        assert_eq!((d.title.as_str(), d.original_title.as_str(), d.font.as_str()), ("大辞林", "大辞林 第四版", "gothic"));
+        // Duplicate detection still uses the imported title.
+        assert_eq!(lib.find_dictionary("大辞林 第四版", "").unwrap(), Some(id));
+        lib.update_dictionary_display(id, "", "").unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().title, "大辞林 第四版");
     }
 }

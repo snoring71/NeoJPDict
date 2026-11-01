@@ -12,6 +12,9 @@
 
   const view = $derived(app.current);
   const entry = $derived(view?.entry);
+  /** The dictionary's own font choice, if it has one, else the app setting. */
+  const dictFont = $derived((entry && app.dict(entry.dictId)?.font) || "");
+  const fontKind = $derived(dictFont === "mincho" || dictFont === "gothic" ? dictFont : dictFont ? "custom" : settings.font);
 
   /** Vertical unless the dictionary, the user or the content says otherwise. */
   const vertical = $derived.by(() => {
@@ -312,8 +315,8 @@
     <div
       class="scroller"
       class:vertical
-      class:gothic={settings.font === "gothic"}
-      style="--entry-size:{settings.fontSize}px"
+      class:gothic={fontKind === "gothic"}
+      style="--entry-size:{settings.fontSize}px{fontKind === 'custom' ? `;font-family:'${dictFont.replace(/['\\;]/g, '')}', var(--font-mincho)` : ''}"
       bind:this={scroller}
       onwheel={wheel}
       onclick={click}

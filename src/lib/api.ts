@@ -38,6 +38,7 @@ export const api = {
   deleteDictionary: (id: number) => call<void>("delete_dictionary", { id }),
   updateDictionary: (id: number, enabled: boolean, groupName: string, writingMode: WritingMode) =>
     call<void>("update_dictionary", { id, enabled, groupName, writingMode }),
+  updateDictionaryDisplay: (id: number, alias: string, font: string) => call<void>("update_dictionary_display", { id, alias, font }),
   reorderDictionaries: (ids: number[]) => call<void>("reorder_dictionaries", { ids }),
   importDictionaries: (paths: string[]) => call<void>("import_dictionaries", { paths }),
 };

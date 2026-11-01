@@ -14,6 +14,19 @@
     await app.refreshDictionaries();
   }
 
+  async function rename(d: DictionaryInfo, name: string) {
+    await api.updateDictionaryDisplay(d.id, name.trim() === d.originalTitle ? "" : name.trim(), d.font ?? "");
+    await app.refreshDictionaries();
+  }
+
+  async function setFont(d: DictionaryInfo, font: string) {
+    const alias = d.title === d.originalTitle ? "" : d.title;
+    await api.updateDictionaryDisplay(d.id, alias, font);
+    await app.refreshDictionaries();
+  }
+
+  const FONT_PRESETS = ["", "mincho", "gothic"];
+
   async function move(i: number, delta: number) {
     const ids = app.dictionaries.map((d) => d.id);
     const j = i + delta;
@@ -78,7 +91,18 @@
       <li class:disabled={!d.enabled}>
         <DictBadge title={d.title} size={36} />
         <div class="info">
-          <div class="name">{d.title} <span class="kind">{d.kind === "epwing" ? "EPWING" : "Yomitan"}</span></div>
+          <div class="name">
+            <input
+              class="rename"
+              value={d.title}
+              title={t("renameHint")}
+              aria-label={t("displayName")}
+              placeholder={d.originalTitle}
+              onkeydown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              onchange={(e) => rename(d, (e.target as HTMLInputElement).value)} />
+            <span class="kind">{d.kind === "epwing" ? "EPWING" : "Yomitan"}</span>
+          </div>
+          {#if d.originalTitle && d.title !== d.originalTitle}<div class="sub">{d.originalTitle}</div>{/if}
           <div class="sub">{counts(d)}{d.revision ? ` · ${d.revision}` : ""}</div>
           {#if d.attribution || d.author}<div class="sub">{d.attribution || d.author}</div>{/if}
         </div>
@@ -96,6 +120,22 @@
             <option value="vertical">{t("vertical")}</option>
             <option value="horizontal">{t("horizontal")}</option>
           </select>
+        </label>
+        <label class="field">
+          <span>{t("font")}</span>
+          {#if FONT_PRESETS.includes(d.font ?? "")}
+            <select value={d.font ?? ""} onchange={(e) => {
+              const v = (e.target as HTMLSelectElement).value;
+              setFont(d, v === "custom" ? (prompt(t("fontFamilyPrompt"), "Yu Mincho") ?? "").trim() : v);
+            }}>
+              <option value="">{t("appDefault")}</option>
+              <option value="mincho">{t("mincho")}</option>
+              <option value="gothic">{t("gothic")}</option>
+              <option value="custom">{t("customFont")}</option>
+            </select>
+          {:else}
+            <input value={d.font} placeholder={t("appDefault")} style:font-family={d.font} onchange={(e) => setFont(d, (e.target as HTMLInputElement).value)} />
+          {/if}
         </label>
         <label class="toggle" title={t("enabled")}>
           <input type="checkbox" checked={d.enabled} onchange={(e) => save(d, { enabled: (e.target as HTMLInputElement).checked })} />
@@ -178,7 +218,7 @@
   }
   .dicts li {
     display: grid;
-    grid-template-columns: auto minmax(180px, 1fr) 120px 120px auto auto;
+    grid-template-columns: auto minmax(180px, 1fr) 110px 110px 120px auto auto;
     align-items: center;
     gap: 14px;
     padding: 12px 14px;
@@ -193,6 +233,30 @@
   .name {
     font-weight: 600;
     font-size: 14.5px;
+  }
+  .name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .rename {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    color: inherit;
+    padding: 1px 4px;
+    margin-left: -5px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+  }
+  .rename:hover {
+    border-color: var(--divider);
+  }
+  .rename:focus {
+    border-color: var(--accent);
+    background: var(--input-bg, var(--card));
+    outline: none;
   }
   .kind {
     font-size: 11px;
