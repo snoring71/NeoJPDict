@@ -105,6 +105,13 @@
           {#if d.originalTitle && d.title !== d.originalTitle}<div class="sub">{d.originalTitle}</div>{/if}
           <div class="sub">{counts(d)}{d.revision ? ` · ${d.revision}` : ""}</div>
           {#if d.attribution || d.author}<div class="sub">{d.attribution || d.author}</div>{/if}
+          {#if d.description || d.url}
+            <details class="about">
+              <summary>{t("aboutDictionary")}</summary>
+              {#if d.description}<p>{d.description}</p>{/if}
+              {#if d.url}<p class="url">{d.url}</p>{/if}
+            </details>
+          {/if}
         </div>
         <label class="field">
           <span>{t("group")}</span>
@@ -271,6 +278,23 @@
     font-size: 12px;
     color: var(--text-2);
     margin-top: 2px;
+    overflow-wrap: anywhere;
+  }
+  .about {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .url {
+    user-select: text;
+  }
+  .about summary {
+    cursor: pointer;
+    color: var(--accent-text);
+  }
+  .about p {
+    margin: 4px 0 0;
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   .field {

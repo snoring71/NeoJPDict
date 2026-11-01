@@ -65,6 +65,12 @@
     app.searchFor(text.replace(/\s+/g, ""));
   }
 
+  /** Focus is in a text field (keys there edit text, not the page). */
+  const isTyping = () => {
+    const el = document.activeElement as HTMLElement | null;
+    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+  };
+
   onMount(() => {
     window.addEventListener("focus", windowFocused);
     readClipboard().then((t) => (lastClip = t?.trim() ?? ""));
@@ -113,6 +119,11 @@
         app.target = (["headwords", "idioms", "examples", "fulltext", "kanji"] as const)[Number(e.key) - 1];
         app.view = "search";
         app.runSearch();
+      } else if (!e.ctrlKey && !e.altKey && reader && app.current && (["PageDown", "PageUp"].includes(e.key) ? document.activeElement?.tagName !== "TEXTAREA" : !isTyping() && [" ", "Home", "End"].includes(e.key))) {
+        // Page through the entry (in vertical text, right to left).
+        e.preventDefault();
+        if (e.key === "Home" || e.key === "End") reader.toEnd(e.key === "End");
+        else reader.page(e.key === "PageUp" || (e.key === " " && e.shiftKey) ? -1 : 1);
       } else if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
         app.goBack();

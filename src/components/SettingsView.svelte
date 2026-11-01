@@ -118,6 +118,7 @@
     <dt>↑ ↓</dt><dd>{t("keyResults")}</dd>
     <dt>Alt+← / Alt+→</dt><dd>{t("back")} / {t("forward")}</dd>
     <dt>Alt+↑ / Alt+↓</dt><dd>{t("keyPrevNext")}</dd>
+    <dt>PageDown / Space, PageUp</dt><dd>{t("keyPage")}</dd>
     <dt>Ctrl+D</dt><dd>{t("bookmark")}</dd>
     <dt>Ctrl+T</dt><dd>{t("toggleDirection")}</dd>
     <dt>Ctrl+= / Ctrl+-</dt><dd>{t("fontSize")}</dd>

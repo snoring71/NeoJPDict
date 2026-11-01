@@ -311,6 +311,27 @@
     saveSettings();
   }
 
+  /**
+   * Page through the entry from the keyboard. In vertical text the entry runs right to
+   * left, so "forward" scrolls left.
+   */
+  export function page(dir: 1 | -1, whole = true) {
+    if (!scroller) return;
+    if (vertical) {
+      const step = whole ? scroller.clientWidth * 0.9 : 60;
+      scroller.scrollBy({ left: -dir * step, behavior: "smooth" });
+    } else {
+      const step = whole ? scroller.clientHeight * 0.9 : 60;
+      scroller.scrollBy({ top: dir * step, behavior: "smooth" });
+    }
+  }
+
+  export function toEnd(end: boolean) {
+    if (!scroller) return;
+    if (vertical) scroller.scrollTo({ left: end ? -scroller.scrollWidth : 0 });
+    else scroller.scrollTo({ top: end ? scroller.scrollHeight : 0 });
+  }
+
   export function toggleDirection() {
     app.directionOverride = vertical ? "horizontal" : "vertical";
   }
