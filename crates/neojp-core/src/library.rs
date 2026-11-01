@@ -92,6 +92,16 @@ CREATE TABLE IF NOT EXISTS history (
     viewed_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS markers (
+    id         INTEGER PRIMARY KEY,
+    term_id    INTEGER NOT NULL,
+    dict_id    INTEGER NOT NULL,
+    text       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT 'yellow',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS markers_term ON markers(term_id);
+
 CREATE TABLE IF NOT EXISTS bookmarks (
     id         INTEGER PRIMARY KEY,
     term_id    INTEGER NOT NULL UNIQUE,
@@ -128,6 +138,13 @@ pub struct DictionaryInfo {
     pub original_title: String,
     /// Font family for entry text ('' = the app default).
     pub font: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Marker {
+    pub id: i64,
+    pub text: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -426,6 +443,7 @@ impl Library {
         }
         tx.execute("DELETE FROM history WHERE dict_id=?1", [id])?;
         tx.execute("DELETE FROM bookmarks WHERE dict_id=?1", [id])?;
+        tx.execute("DELETE FROM markers WHERE dict_id=?1", [id])?;
         tx.execute("DELETE FROM dictionaries WHERE id=?1", [id])?;
         tx.commit()?;
         Ok(())
@@ -1113,6 +1131,30 @@ impl Library {
 
     pub fn clear_history(&self) -> Result<()> {
         self.conn.execute("DELETE FROM history", [])?;
+        Ok(())
+    }
+
+    /// Highlighter marks the user drew in an entry.
+    pub fn markers(&self, term_id: i64) -> Result<Vec<Marker>> {
+        let mut st = self.conn.prepare("SELECT id, text, color FROM markers WHERE term_id=?1 ORDER BY id")?;
+        let rows = st.query_map([term_id], |r| Ok(Marker { id: r.get(0)?, text: r.get(1)?, color: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn add_marker(&self, term_id: i64, text: &str, color: &str) -> Result<i64> {
+        let color = match color {
+            "pink" | "blue" | "green" => color,
+            _ => "yellow",
+        };
+        self.conn.execute(
+            "INSERT INTO markers(term_id, dict_id, text, color) SELECT id, dict_id, ?2, ?3 FROM terms WHERE id=?1",
+            params![term_id, text.trim(), color],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn remove_marker(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM markers WHERE id=?1", [id])?;
         Ok(())
     }
 

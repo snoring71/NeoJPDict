@@ -160,46 +160,67 @@ const foldText = (s: string) => Array.from(s, foldChar).join("");
 /** Remove highlight marks of class `cls` added earlier. */
 export function clearMarks(root: HTMLElement, cls: string) {
   for (const m of Array.from(root.querySelectorAll(`mark.${cls}`))) {
-    m.replaceWith(document.createTextNode(m.textContent ?? ""));
+    m.replaceWith(...Array.from(m.childNodes));
   }
   root.normalize();
 }
 
 /**
  * Wrap every occurrence of `needle` (kana- and width-insensitive) in `<mark class=cls>`.
- * Returns the marks in document order.
+ * A match may run across elements (e.g. 「壁に<b>絵</b>を」); each piece is wrapped.
+ * Ruby readings are skipped. Returns the first mark of each match, in document order.
  */
-export function markText(root: HTMLElement, needle: string, cls: string): HTMLElement[] {
-  const want = foldText(needle.trim());
+export function markText(root: HTMLElement, needle: string, cls: string, attrs: Record<string, string> = {}): HTMLElement[] {
+  const want = foldText(needle.replace(/\s+/g, ""));
   if (!want) return [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) =>
-      n.parentElement?.closest("rt, svg, style, script, mark") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      n.parentElement?.closest(`rt, rp, svg, style, script, mark.${cls}`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
   });
   const nodes: Text[] = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
-  const marks: HTMLElement[] = [];
-  for (const node of nodes) {
-    const text = node.data;
-    // Folding keeps one UTF-16 unit per unit for the scripts involved, so indices line up.
-    const folded = foldText(text);
-    if (folded.length !== text.length) continue;
-    let at = folded.indexOf(want);
-    if (at < 0) continue;
-    let cur: Text = node;
-    let offset = 0;
-    while (at >= 0) {
-      const hit = cur.splitText(at - offset);
-      const rest = hit.splitText(want.length);
+  const starts: number[] = [];
+  let full = "";
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n as Text;
+    // Whitespace between elements is layout, not text: leave it out of the haystack.
+    const folded = foldText(t.data);
+    if (folded.length !== t.data.length) continue;
+    nodes.push(t);
+    starts.push(full.length);
+    full += folded;
+  }
+  // Matches as [start, end) in the haystack.
+  const found: [number, number][] = [];
+  for (let at = full.indexOf(want); at >= 0; at = full.indexOf(want, at + want.length)) found.push([at, at + want.length]);
+  if (found.length === 0) return [];
+  // Pieces per node, so each node is split from its end backwards.
+  const pieces = new Map<number, { from: number; to: number; match: number }[]>();
+  found.forEach(([a, b], m) => {
+    for (let k = 0; k < nodes.length; k++) {
+      const s = starts[k];
+      const e = s + nodes[k].data.length;
+      if (e <= a || s >= b) continue;
+      const list = pieces.get(k) ?? [];
+      list.push({ from: Math.max(a, s) - s, to: Math.min(b, e) - s, match: m });
+      pieces.set(k, list);
+    }
+  });
+  const firsts: (HTMLElement | null)[] = found.map(() => null);
+  for (const [k, list] of pieces) {
+    for (const p of list.sort((x, y) => y.from - x.from)) {
+      let node = nodes[k];
+      if (p.to < node.data.length) node.splitText(p.to);
+      if (p.from > 0) node = node.splitText(p.from);
       const mark = document.createElement("mark");
       mark.className = cls;
-      hit.replaceWith(mark);
-      mark.append(hit);
-      marks.push(mark);
-      offset = at + want.length;
-      cur = rest;
-      at = folded.indexOf(want, offset);
+      for (const [k, v] of Object.entries(attrs)) mark.setAttribute(k, v);
+      node.replaceWith(mark);
+      mark.append(node);
+      // Pieces are visited back to front, so the last one seen is the match's first.
+      if (!firsts[p.match] || mark.compareDocumentPosition(firsts[p.match]!) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        firsts[p.match] = mark;
+      }
     }
   }
-  return marks;
+  return firsts.filter((m): m is HTMLElement => !!m);
 }

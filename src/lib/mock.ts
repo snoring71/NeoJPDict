@@ -46,6 +46,7 @@ function data(): Promise<Fixture> {
 const kata2hira = (s: string) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
 const key = (s: string) => kata2hira(s.normalize("NFKC")).toLowerCase();
 const history: HistoryItem[] = [];
+const markers: { id: number; termId: number; text: string; color: string }[] = [];
 const marks = new Set<number>();
 const notes = new Map<number, { folder: string; note: string }>();
 
@@ -133,6 +134,17 @@ export const mockApi = {
   async bookmarks() {
     const d = await data();
     return d.entries.filter((e) => marks.has(e.termId)).map((e) => ({ id: e.termId, termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, at: new Date().toISOString(), ...(notes.get(e.termId) ?? { folder: "", note: "" }) }));
+  },
+  async markers({ termId }: any) {
+    return markers.filter((m) => m.termId === termId);
+  },
+  async add_marker({ termId, text, color }: any) {
+    markers.push({ id: markers.length + 1, termId, text, color });
+    return markers.length;
+  },
+  async remove_marker({ id }: any) {
+    const i = markers.findIndex((m) => m.id === id);
+    if (i >= 0) markers.splice(i, 1);
   },
   async set_bookmark({ termId, on }: any) {
     on ? marks.add(termId) : marks.delete(termId);

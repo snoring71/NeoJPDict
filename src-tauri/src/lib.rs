@@ -176,6 +176,21 @@ fn bookmarks(state: State<AppState>) -> CmdResult<Vec<HistoryItem>> {
 }
 
 #[tauri::command]
+fn markers(state: State<AppState>, term_id: i64) -> CmdResult<Vec<neojp_core::library::Marker>> {
+    state.lib.lock().unwrap().markers(term_id).map_err(err)
+}
+
+#[tauri::command]
+fn add_marker(state: State<AppState>, term_id: i64, text: String, color: String) -> CmdResult<i64> {
+    state.lib.lock().unwrap().add_marker(term_id, &text, &color).map_err(err)
+}
+
+#[tauri::command]
+fn remove_marker(state: State<AppState>, id: i64) -> CmdResult<()> {
+    state.lib.lock().unwrap().remove_marker(id).map_err(err)
+}
+
+#[tauri::command]
 fn set_bookmark(state: State<AppState>, term_id: i64, on: bool) -> CmdResult<()> {
     state.lib.lock().unwrap().set_bookmark(term_id, on).map_err(err)
 }
@@ -432,6 +447,9 @@ pub fn run() {
             clear_history,
             bookmarks,
             set_bookmark,
+            markers,
+            add_marker,
+            remove_marker,
             update_bookmark,
             export_bookmarks,
             delete_dictionary,

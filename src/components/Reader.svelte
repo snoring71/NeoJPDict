@@ -226,14 +226,69 @@
     window.print();
   }
 
-  // なぞってジャンプ: select text in the entry to look it up.
-  let pick: { text: string; x: number; y: number } | null = $state(null);
+  // なぞってジャンプ: select text in the entry to look it up or mark it.
+  let pick: { text: string; x: number; y: number; markerId?: number } | null = $state(null);
 
-  function selectionDone() {
+  // Highlighter marks (マーカー) saved with the entry.
+  let markers: { id: number; text: string; color: string }[] = $state([]);
+  const MARKER_COLORS = ["yellow", "pink", "blue", "green"];
+
+  $effect(() => {
+    const id = entry?.termId;
+    markers = [];
+    if (id) api.markers(id).then((m) => { if (entry?.termId === id) markers = m; }).catch(() => {});
+  });
+
+  $effect(() => {
+    body.html;
+    const list = markers;
+    if (!scroller) return;
+    queueMicrotask(() => {
+      const root = scroller!.querySelector<HTMLElement>(".entry");
+      if (!root) return;
+      clearMarks(root, "nj-hl");
+      for (const m of list) markText(root, m.text, "nj-hl", { "data-marker": String(m.id), "data-color": m.color });
+    });
+  });
+
+  async function addMarker(color: string) {
+    if (!pick || !entry?.termId) return;
+    const text = pick.text;
+    pick = null;
+    window.getSelection()?.removeAllRanges();
+    const id = await api.addMarker(entry.termId, text, color);
+    markers = [...markers, { id, text, color }];
+  }
+
+  async function removeMarker() {
+    if (!pick?.markerId) return;
+    const id = pick.markerId;
+    pick = null;
+    await api.removeMarker(id);
+    markers = markers.filter((m) => m.id !== id);
+  }
+
+  /** Selected text without ruby readings. */
+  function selectedText(sel: Selection): string {
+    const box = document.createElement("div");
+    box.append(sel.getRangeAt(0).cloneContents());
+    box.querySelectorAll("rt, rp").forEach((n) => n.remove());
+    return (box.textContent ?? "").replace(/\s+/g, "").trim();
+  }
+
+  function selectionDone(e: MouseEvent) {
     setTimeout(() => {
       const sel = window.getSelection();
-      const text = sel?.toString().replace(/\s+/g, "").trim() ?? "";
-      if (!sel || sel.rangeCount === 0 || !text || text.length > 40 || !scroller?.contains(sel.anchorNode)) {
+      const text = sel && sel.rangeCount > 0 && !sel.isCollapsed ? selectedText(sel) : "";
+      if (!sel || !text || text.length > 200 || !scroller?.contains(sel.anchorNode)) {
+        // A click on a marker offers to remove it.
+        const m = (e.target as HTMLElement).closest?.<HTMLElement>("mark.nj-hl");
+        if (m && !text) {
+          const r = m.getBoundingClientRect();
+          const id = Number(m.dataset.marker);
+          pick = { text: markers.find((x) => x.id === id)?.text ?? "", x: r.left + r.width / 2, y: r.bottom + 6, markerId: id };
+          return;
+        }
         pick = null;
         return;
       }
@@ -423,9 +478,24 @@
         <div class="entry-body">{@html body.html}</div>
       </article>
       {#if pick}
-        <button class="pick" style="left:{pick.x}px; top:{pick.y}px" onmousedown={(e) => e.preventDefault()} onclick={(e) => { e.stopPropagation(); lookUpPick(); }}>
-          <Icon name="search" size={14} />「{pick.text.length > 12 ? pick.text.slice(0, 12) + "…" : pick.text}」{t("lookUp")}
-        </button>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="pick" style="left:{pick.x}px; top:{pick.y}px" onmousedown={(e) => e.preventDefault()} onclick={(e) => e.stopPropagation()}>
+          {#if pick.markerId}
+            <button class="pick-btn" onclick={removeMarker}><Icon name="close" size={14} />{t("removeMarker")}</button>
+          {:else}
+            {#if pick.text.length <= 40}
+              <button class="pick-btn" onclick={lookUpPick}>
+                <Icon name="search" size={14} />「{pick.text.length > 12 ? pick.text.slice(0, 12) + "…" : pick.text}」{t("lookUp")}
+              </button>
+            {/if}
+            {#if entry.termId}
+              <span class="pick-sep"></span>
+              {#each MARKER_COLORS as c}
+                <button class="swatch" data-color={c} title={t("addMarker")} aria-label="{t('addMarker')} ({c})" onclick={() => addMarker(c)}></button>
+              {/each}
+            {/if}
+          {/if}
+        </div>
       {/if}
     </div>
 
@@ -742,17 +812,65 @@
     z-index: 15;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     writing-mode: horizontal-tb;
     white-space: nowrap;
-    padding: 4px 10px;
-    border-radius: 14px;
+    padding: 3px 8px;
+    border-radius: 16px;
     border: 1px solid var(--divider);
     background: var(--flyout);
     color: var(--text-1);
     box-shadow: var(--shadow);
     font-family: var(--font-ui-jp);
     font-size: 13px;
+  }
+  .pick-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    padding: 2px 4px;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .pick-btn:hover {
+    background: var(--hover);
+  }
+  .pick-sep {
+    width: 1px;
+    align-self: stretch;
+    background: var(--divider);
+  }
+  .swatch {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgb(0 0 0 / 0.15);
+    cursor: pointer;
+  }
+  .swatch[data-color="yellow"],
+  .entry :global(mark.nj-hl[data-color="yellow"]) {
+    background: rgb(255 224 80 / 0.55);
+  }
+  .swatch[data-color="pink"],
+  .entry :global(mark.nj-hl[data-color="pink"]) {
+    background: rgb(255 120 170 / 0.45);
+  }
+  .swatch[data-color="blue"],
+  .entry :global(mark.nj-hl[data-color="blue"]) {
+    background: rgb(100 170 255 / 0.45);
+  }
+  .swatch[data-color="green"],
+  .entry :global(mark.nj-hl[data-color="green"]) {
+    background: rgb(110 210 120 / 0.45);
+  }
+  .entry :global(mark.nj-hl) {
+    color: inherit;
+    border-radius: 2px;
     cursor: pointer;
   }
   .mark-wrap {
