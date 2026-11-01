@@ -3,6 +3,7 @@
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
   import { mediaBase } from "../lib/api";
+  import { adaptHtml, logicalStyles } from "../lib/layout";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
 
@@ -33,7 +34,7 @@
   /** Split off the first line when the entry already starts with its own headword (common in 国語辞典). */
   const body = $derived.by(() => {
     if (!entry) return { head: "", html: "", own: false };
-    const html = entry.html.replaceAll("nj-media:", mediaBase());
+    const html = adaptHtml(entry.html.replaceAll("nj-media:", mediaBase()), vertical);
     // EPWING text starts with its own headline, so no separate heading is drawn.
     if (html.startsWith('<div class="ep">')) return { head: "", html, own: true };
     const m = html.match(/^(<div class="gloss(?: sc)?">)([^<]{1,80}?【[^<]{1,60}?】[^<]{0,40}?)(<br>|<\/div>)/);
@@ -197,7 +198,7 @@
           </div>
         {/if}
         {#if entry.styles}
-          {@html `<style>.entry-body{${entry.styles}}</style>`}
+          {@html `<style>.entry-body{${logicalStyles(entry.styles)}}</style>`}
         {/if}
         <div class="entry-body">{@html body.html}</div>
       </article>
@@ -469,6 +470,21 @@
   .vertical .entry-body :global(.sc-img-inline) {
     /* Label images (表記, 派生…) are drawn for horizontal text; keep them upright and sized to the line. */
     writing-mode: horizontal-tb;
+  }
+  .entry-body :global(.nj-turn) {
+    display: inline-block;
+    position: relative;
+    vertical-align: middle;
+  }
+  /* Horizontal-text alignment hints (text-bottom…) push turned marks off the column's centre line. */
+  .entry-body :global(:has(> .nj-turn)) {
+    vertical-align: baseline !important;
+  }
+  .entry-body :global(.nj-turn > img) {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) rotate(90deg);
   }
   .entry-body :global(ruby rt) {
     font-size: 0.5em;
