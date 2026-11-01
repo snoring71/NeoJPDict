@@ -81,3 +81,48 @@ fn cancelled_import_leaves_nothing() {
     assert!(matches!(r, Err(neojp_core::Error::Cancelled)));
     assert!(lib.dictionaries().unwrap().is_empty());
 }
+
+/// 三省堂国語辞典 (Yomitan) keeps a word's phrases (句) as their own terms, plus a
+/// term with the word's sequence number whose glossary only links to them.
+#[test]
+fn phrases_are_drawn_under_their_word() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sankoku.zip");
+    let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    z.start_file("index.json", opts).unwrap();
+    z.write_all(r#"{"title":"三省堂国語辞典","format":3,"revision":"s8","sequenced":true}"#.as_bytes()).unwrap();
+    z.start_file("term_bank_1.json", opts).unwrap();
+    z.write_all(
+        r#"[
+          ["本気","ほんき","","",0,[{"type":"structured-content","content":[{"tag":"span","data":{"name":"見出部"},"content":"ほんき［本気］"},{"tag":"div","content":"①まじめで熱心な気持ち。"}]}],5535600000,""],
+          ["本気","ほんき","句","",-1,[{"type":"structured-content","content":{"tag":"a","href":"?query=本気にする&wildcards=off","content":"本気にする"}},{"type":"structured-content","content":{"tag":"a","href":"?query=本気になる&wildcards=off","content":"本気になる"}}],5535600000,""],
+          ["本気にする","ほんきにする","","vs",0,[{"type":"structured-content","content":[{"tag":"span","content":"本気にする"},{"tag":"div","content":"本当のことと思う。"}]}],5535616385,""],
+          ["本気になる","ほんきになる","","v5",0,[{"type":"structured-content","content":[{"tag":"span","content":"本気になる"},{"tag":"div","content":"やる気持ちになる。"}]}],5535616386,""],
+          ["見よ","みよ","","",0,[{"type":"structured-content","content":{"tag":"a","href":"?query=本気","content":"本気"}}],7,""]
+        ]"#
+        .as_bytes(),
+    )
+    .unwrap();
+    z.finish().unwrap();
+
+    let lib = Library::open(dir.path().join("lib.db")).unwrap();
+    yomitan::import(&lib, &path, |_| true).unwrap();
+    let q = |text: &str| SearchQuery { text: text.into(), mode: MatchMode::Exact, limit: 50, ..Default::default() };
+
+    // The link-only row is folded into the word.
+    let hits = lib.search(&q("本気")).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let e = lib.entry(hits[0].term_id, None).unwrap();
+    assert!(e.html.contains("まじめで熱心な気持ち"));
+    assert!(e.html.contains("<div class=\"sub-entry\">"));
+    assert!(e.html.contains("本当のことと思う。") && e.html.contains("やる気持ちになる。"), "{}", e.html);
+
+    // Phrases still have their own rows and entries.
+    let e = lib.entry(lib.search(&q("本気にする")).unwrap()[0].term_id, None).unwrap();
+    assert!(!e.html.contains("sub-entry"));
+
+    // A plain cross-reference (no sibling with its sequence) stays a link.
+    let e = lib.entry(lib.search(&q("見よ")).unwrap()[0].term_id, None).unwrap();
+    assert!(e.html.contains("data-query=\"本気\"") && !e.html.contains("sub-entry"));
+}
