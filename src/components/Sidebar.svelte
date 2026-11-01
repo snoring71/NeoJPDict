@@ -174,9 +174,9 @@
 
     {#if app.groups.length > 0}
       <div class="groups" role="tablist">
-        <button class:active={app.group === ""} onclick={() => setGroup("")}>{t("all")}</button>
+        <button class="chip" class:active={app.group === ""} onclick={() => setGroup("")}>{t("all")}</button>
         {#each app.groups as g}
-          <button class:active={app.group === g} onclick={() => setGroup(g)}>{g}</button>
+          <button class="chip" class:active={app.group === g} onclick={() => setGroup(g)}>{g}</button>
         {/each}
       </div>
     {/if}
@@ -555,6 +555,10 @@
     font-size: 13.5px;
     font-family: var(--font-ui-jp);
     cursor: pointer;
+  }
+  .groups button:not(.active):hover {
+    background: var(--hover);
+    color: var(--text-1);
   }
   .groups button.active {
     background: var(--accent);
