@@ -808,19 +808,17 @@
   /* Phrases (句) drawn under the word they belong to. */
   .entry-body :global(.sub-entry) {
     margin-block-start: 0.8em;
-    position: relative;
     padding-inline-start: 0.9em;
   }
-  /* Red dot before the phrase, centred on its first line (as printed 国語辞典 mark 句). */
-  .entry-body :global(.sub-entry)::before {
-    content: "";
-    position: absolute;
-    inset-inline-start: 0;
-    inset-block-start: calc(0.5lh - 0.21em);
-    width: 0.42em;
-    height: 0.42em;
-    border-radius: 50%;
-    background: #e03c22;
+  /* Red dot before the phrase, set as a glyph in its first line so it shares the
+     text's centre line in both vertical and horizontal layouts. */
+  .entry-body :global(.sub-entry > :first-child)::before {
+    content: "●";
+    font-size: 0.6em;
+    font-weight: normal;
+    color: #e03c22;
+    margin-inline-start: -1.5em;
+    margin-inline-end: 0.5em;
   }
   .entry-body :global(.ep-deco-1) {
     font-style: italic;
