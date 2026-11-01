@@ -173,12 +173,37 @@
     if (ep && entry) app.openAt(entry.dictId, ep);
   }
 
-  function size(d: number) {
+  // なぞってジャンプ: select text in the entry to look it up.
+  let pick: { text: string; x: number; y: number } | null = $state(null);
+
+  function selectionDone() {
+    setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel?.toString().replace(/\s+/g, "").trim() ?? "";
+      if (!sel || sel.rangeCount === 0 || !text || text.length > 40 || !scroller?.contains(sel.anchorNode)) {
+        pick = null;
+        return;
+      }
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      pick = { text, x: r.left + r.width / 2, y: r.bottom + 6 };
+    }, 0);
+  }
+
+  function lookUpPick() {
+    if (!pick) return;
+    const text = pick.text;
+    pick = null;
+    window.getSelection()?.removeAllRanges();
+    app.target = "headwords";
+    app.searchFor(text);
+  }
+
+  export function size(d: number) {
     settings.fontSize = Math.max(12, Math.min(40, settings.fontSize + d));
     saveSettings();
   }
 
-  function toggleDirection() {
+  export function toggleDirection() {
     app.directionOverride = vertical ? "horizontal" : "vertical";
   }
 
@@ -291,7 +316,9 @@
       style="--entry-size:{settings.fontSize}px"
       bind:this={scroller}
       onwheel={wheel}
-      onclick={click}>
+      onclick={click}
+      onmouseup={selectionDone}
+      onscroll={() => (pick = null)}>
       <article class="entry" lang="ja">
         {#if body.own}
           <!-- headline is part of the entry text -->
@@ -326,6 +353,11 @@
         {/if}
         <div class="entry-body">{@html body.html}</div>
       </article>
+      {#if pick}
+        <button class="pick" style="left:{pick.x}px; top:{pick.y}px" onmousedown={(e) => e.preventDefault()} onclick={(e) => { e.stopPropagation(); lookUpPick(); }}>
+          <Icon name="search" size={14} />「{pick.text.length > 12 ? pick.text.slice(0, 12) + "…" : pick.text}」{t("lookUp")}
+        </button>
+      {/if}
     </div>
 
     <footer class="nav">
@@ -446,7 +478,7 @@
     font-family: var(--font-mincho);
     font-size: var(--entry-size);
     line-height: 1.75;
-    color: var(--text-1);
+    color: var(--paper-text, var(--text-1));
   }
   .scroller.gothic {
     font-family: var(--font-gothic);
@@ -602,6 +634,25 @@
   }
   .entry :global(mark.nj-hit.current) {
     background: rgb(255 149 0 / 0.75);
+  }
+  .pick {
+    position: fixed;
+    transform: translateX(-50%);
+    z-index: 15;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    writing-mode: horizontal-tb;
+    white-space: nowrap;
+    padding: 4px 10px;
+    border-radius: 14px;
+    border: 1px solid var(--divider);
+    background: var(--flyout);
+    color: var(--text-1);
+    box-shadow: var(--shadow);
+    font-family: var(--font-ui-jp);
+    font-size: 13px;
+    cursor: pointer;
   }
   .mark-wrap {
     position: relative;

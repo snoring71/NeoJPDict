@@ -7,9 +7,24 @@ export interface Settings {
   fontSize: number;
   font: "mincho" | "gothic";
   writingMode: WritingMode;
+  /** Reader background: follow the theme, or a fixed paper colour. */
+  paper: "theme" | "white" | "cream" | "gray" | "black";
+  /** Search copied Japanese text when the window comes to the front. */
+  clipboardLookup: boolean;
+  /** Keep the window above other windows. */
+  onTop: boolean;
 }
 
-const defaults: Settings = { language: "auto", theme: "system", fontSize: 18, font: "mincho", writingMode: "auto" };
+const defaults: Settings = {
+  language: "auto",
+  theme: "system",
+  fontSize: 18,
+  font: "mincho",
+  writingMode: "auto",
+  paper: "theme",
+  clipboardLookup: false,
+  onTop: false,
+};
 
 function load(): Settings {
   try {

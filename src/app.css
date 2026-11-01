@@ -181,3 +181,9 @@ select option {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Reader paper colours (Settings → Reader background). */
+:root[data-paper="white"] { --reader-bg: #ffffff; --paper-text: #1a1a1a; }
+:root[data-paper="cream"] { --reader-bg: #f7f1e3; --paper-text: #2b2620; }
+:root[data-paper="gray"] { --reader-bg: #3a3a3c; --paper-text: #ececec; }
+:root[data-paper="black"] { --reader-bg: #000000; --paper-text: #e8e8e8; }

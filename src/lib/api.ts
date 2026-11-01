@@ -100,3 +100,19 @@ export async function pickCsvSavePath(): Promise<string | null> {
   const { save } = await import("@tauri-apps/plugin-dialog");
   return save({ defaultPath: "bookmarks.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
 }
+
+export async function readClipboard(): Promise<string | null> {
+  if (!inTauri) return null;
+  try {
+    const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+    return await readText();
+  } catch {
+    return null;
+  }
+}
+
+export async function setAlwaysOnTop(on: boolean) {
+  if (!inTauri) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().setAlwaysOnTop(on).catch(() => {});
+}

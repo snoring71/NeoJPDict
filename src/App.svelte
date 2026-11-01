@@ -3,7 +3,7 @@
   import { app, type View } from "./lib/store.svelte";
   import { settings } from "./lib/settings.svelte";
   import { t, lang, type MessageKey } from "./lib/i18n";
-  import { api, onFileDrop, onImportProgress, onIndexProgress } from "./lib/api";
+  import { api, onFileDrop, onImportProgress, onIndexProgress, readClipboard, setAlwaysOnTop } from "./lib/api";
   import Icon from "./components/Icon.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Reader from "./components/Reader.svelte";
@@ -38,10 +38,30 @@
   $effect(() => {
     const root = document.documentElement;
     root.dataset.theme = settings.theme;
+    root.dataset.paper = settings.paper;
     root.lang = lang();
   });
 
+  $effect(() => {
+    setAlwaysOnTop(settings.onTop);
+  });
+
+  let compact = $state(false);
+  let lastClip = "";
+
+  /** Clipboard lookup: when the window comes to the front, search newly copied Japanese text. */
+  async function windowFocused() {
+    if (!settings.clipboardLookup) return;
+    const text = (await readClipboard())?.trim() ?? "";
+    if (!text || text === lastClip || text.length > 40 || !/[぀-ヿ㐀-鿿]/.test(text)) return;
+    lastClip = text;
+    app.view = "search";
+    app.searchFor(text.replace(/\s+/g, ""));
+  }
+
   onMount(() => {
+    window.addEventListener("focus", windowFocused);
+    readClipboard().then((t) => (lastClip = t?.trim() ?? ""));
     app.refreshDictionaries();
     const unsubs: (() => void)[] = [];
     onImportProgress((e) => {
@@ -63,7 +83,25 @@
         reader.openFind();
       } else if ((e.ctrlKey && (e.key === "f" || e.key === "l" || e.key === "k")) || (e.key === "/" && document.activeElement?.tagName !== "INPUT")) {
         e.preventDefault();
+        compact = false;
         show("search");
+      } else if (e.ctrlKey && e.shiftKey && (e.key === "M" || e.key === "m")) {
+        e.preventDefault();
+        compact = !compact;
+      } else if (e.ctrlKey && !e.shiftKey && e.key === "d" && app.current) {
+        e.preventDefault();
+        app.toggleBookmark();
+      } else if (e.ctrlKey && e.key === "t" && app.current) {
+        e.preventDefault();
+        reader?.toggleDirection();
+      } else if (e.ctrlKey && (e.key === "=" || e.key === "+" || e.key === "-")) {
+        e.preventDefault();
+        reader?.size(e.key === "-" ? -2 : 2);
+      } else if (e.ctrlKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+        e.preventDefault();
+        app.target = (["headwords", "idioms", "examples", "fulltext", "kanji"] as const)[Number(e.key) - 1];
+        app.view = "search";
+        app.runSearch();
       } else if (e.altKey && e.key === "ArrowLeft" && app.current?.prev) {
         app.open(app.current.prev);
       } else if (e.altKey && e.key === "ArrowRight" && app.current?.next) {
@@ -74,13 +112,14 @@
     setTimeout(() => sidebar?.focusSearch(), 50);
     return () => {
       window.removeEventListener("keydown", keys);
+      window.removeEventListener("focus", windowFocused);
       unsubs.forEach((u) => u());
     };
   });
 </script>
 
-<div class="shell">
-  <Sidebar bind:this={sidebar} />
+<div class="shell" class:compact>
+  {#if !compact}<Sidebar bind:this={sidebar} />{/if}
   <main>
     <nav class="toolbar" aria-label="views">
       {#each tabs as tab}
@@ -118,6 +157,9 @@
     grid-template-columns: minmax(260px, 340px) 1fr;
     height: 100vh;
     overflow: hidden;
+  }
+  .shell.compact {
+    grid-template-columns: 1fr;
   }
   main {
     display: flex;

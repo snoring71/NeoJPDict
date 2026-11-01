@@ -359,6 +359,7 @@ fn percent_decode(s: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .register_uri_scheme_protocol("njmedia", |ctx, request| {
             media_response(ctx.app_handle(), request.uri().path())
         })
