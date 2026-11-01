@@ -1,0 +1,7 @@
+node_modules/
+dist/
+target/
+src-tauri/gen/
+public/dev-fixture/
+*.log
+.DS_Store
