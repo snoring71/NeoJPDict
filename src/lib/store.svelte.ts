@@ -4,6 +4,17 @@ import type { HeadwordMode, DictionaryInfo, EntryView, HistoryItem, ImportEvent,
 export type View = "search" | "browse" | "history" | "bookmarks" | "library" | "settings";
 export type Target = "headwords" | "idioms" | "examples" | "fulltext" | "kanji";
 
+/** A place to go back to: an entry, and the search that was on screen with it. */
+interface Place {
+  termId: number;
+  dictId: number;
+  locator: string;
+  query: string;
+  target: Target;
+}
+const samePlace = (a: Place, b: Place) =>
+  a.dictId === b.dictId && (a.termId ? a.termId === b.termId : a.locator === b.locator);
+
 class AppStore {
   view: View = $state("search");
   dictionaries: DictionaryInfo[] = $state([]);
@@ -28,6 +39,13 @@ class AppStore {
   browseHits: SearchHit[] = $state([]);
   /** Full-text indexing in progress: dictionary title and percentage. */
   indexing: { title: string; pct: number } | null = $state(null);
+  /** Back / forward through the entries shown, like a browser. */
+  backStack: Place[] = $state([]);
+  forwardStack: Place[] = $state([]);
+  private here: Place | null = null;
+  /** The last entry was opened automatically by search-as-you-type. */
+  private autoChain = false;
+  private restoring = false;
 
   /** Text to highlight in the open entry (the query, for text searches). */
   get highlight(): string {
@@ -95,15 +113,61 @@ class AppStore {
     this.recentQueries = [q, ...this.recentQueries.filter((x) => x !== q)].slice(0, 30);
   }
 
-  async open(hit: SearchHit, record = true) {
-    this.selected = hit;
-    this.directionOverride = null;
-    this.current = await api.getEntry(hit.termId, record);
+  /** Note that `next` is now on screen, keeping where we were for Back. */
+  private arrive(next: Place, auto: boolean) {
+    if (!this.restoring && this.here && !samePlace(this.here, next) && !(auto && this.autoChain)) {
+      this.backStack.push(this.here);
+      if (this.backStack.length > 200) this.backStack.shift();
+      this.forwardStack = [];
+    }
+    if (!this.restoring) this.autoChain = auto;
+    this.here = next;
   }
 
-  async openTerm(termId: number) {
-    const v = await api.getEntry(termId, true);
+  private placeOf(v: EntryView, locator = ""): Place {
+    return { termId: v.entry.termId, dictId: v.entry.dictId, locator, query: this.query, target: this.target };
+  }
+
+  async goBack() {
+    await this.travel(this.backStack, this.forwardStack);
+  }
+
+  async goForward() {
+    await this.travel(this.forwardStack, this.backStack);
+  }
+
+  private async travel(from: Place[], to: Place[]) {
+    const p = from.pop();
+    if (!p) return;
+    if (this.here) to.push(this.here);
+    this.restoring = true;
+    this.autoChain = false;
+    try {
+      if (p.termId) await this.openTerm(p.termId, false);
+      else await this.openAt(p.dictId, p.locator);
+      if (p.query !== this.query || p.target !== this.target) {
+        this.query = p.query;
+        this.target = p.target;
+        await this.runSearch();
+      }
+      this.here = p;
+    } finally {
+      this.restoring = false;
+    }
+  }
+
+  async open(hit: SearchHit, record = true, auto = !record) {
+    this.selected = hit;
+    this.directionOverride = null;
+    const v = await api.getEntry(hit.termId, record);
     this.current = v;
+    this.arrive(this.placeOf(v), auto);
+  }
+
+  async openTerm(termId: number, record = true) {
+    const v = await api.getEntry(termId, record);
+    this.current = v;
+    this.arrive(this.placeOf(v), false);
     this.directionOverride = null;
     const e = v.entry;
     this.selected = { termId, dictId: e.dictId, expression: e.expression, reading: e.reading, deinflection: null };
@@ -113,6 +177,7 @@ class AppStore {
   async openAt(dictId: number, locator: string) {
     const v = await api.getEntryAt(dictId, locator);
     this.current = v;
+    this.arrive(this.placeOf(v, locator), false);
     this.directionOverride = null;
     const e = v.entry;
     this.selected = e.termId ? { termId: e.termId, dictId, expression: e.expression, reading: e.reading, deinflection: null } : null;

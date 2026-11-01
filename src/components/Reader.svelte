@@ -253,6 +253,10 @@
 <section class="reader" aria-label={entry?.dictTitle}>
   {#if view && entry}
     <header class="entry-bar">
+      <div class="nav">
+        <button class="icon" title={t("back")} aria-label={t("back")} disabled={app.backStack.length === 0} onclick={() => app.goBack()}><Icon name="left" /></button>
+        <button class="icon" title={t("forward")} aria-label={t("forward")} disabled={app.forwardStack.length === 0} onclick={() => app.goForward()}><Icon name="right" /></button>
+      </div>
       <div class="title-wrap">
         <button class="title" onclick={() => (menuOpen = !menuOpen)} disabled={siblings.length === 0}>
           <DictBadge title={entry.dictTitle} size={24} />
@@ -403,6 +407,16 @@
     padding: 0 12px;
     border-bottom: 1px solid var(--divider);
     flex: none;
+  }
+  .nav {
+    display: flex;
+    flex: none;
+    gap: 0;
+    margin-inline-end: 2px;
+  }
+  .nav .icon:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
   .title-wrap {
     position: relative;

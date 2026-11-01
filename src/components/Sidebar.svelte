@@ -100,7 +100,7 @@
       const i = hits.findIndex((h) => h.termId === app.selected?.termId);
       const j = Math.max(0, Math.min(hits.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
       if (hits[j]) {
-        app.open(hits[j]);
+        app.open(hits[j], true, true);
         document.getElementById(`hit-${hits[j].termId}`)?.scrollIntoView({ block: "nearest" });
       }
     }

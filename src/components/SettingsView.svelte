@@ -116,7 +116,8 @@
     <dt>Ctrl+L, /</dt><dd>{t("keySearch")}</dd>
     <dt>Ctrl+F</dt><dd>{t("findInEntry")}</dd>
     <dt>↑ ↓</dt><dd>{t("keyResults")}</dd>
-    <dt>Alt+← / Alt+→</dt><dd>{t("keyPrevNext")}</dd>
+    <dt>Alt+← / Alt+→</dt><dd>{t("back")} / {t("forward")}</dd>
+    <dt>Alt+↑ / Alt+↓</dt><dd>{t("keyPrevNext")}</dd>
     <dt>Ctrl+D</dt><dd>{t("bookmark")}</dd>
     <dt>Ctrl+T</dt><dd>{t("toggleDirection")}</dd>
     <dt>Ctrl+= / Ctrl+-</dt><dd>{t("fontSize")}</dd>

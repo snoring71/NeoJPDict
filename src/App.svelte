@@ -113,16 +113,33 @@
         app.target = (["headwords", "idioms", "examples", "fulltext", "kanji"] as const)[Number(e.key) - 1];
         app.view = "search";
         app.runSearch();
-      } else if (e.altKey && e.key === "ArrowLeft" && app.current?.prev) {
+      } else if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        app.goBack();
+      } else if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        app.goForward();
+      } else if (e.altKey && e.key === "ArrowUp" && app.current?.prev) {
+        e.preventDefault();
         app.open(app.current.prev);
-      } else if (e.altKey && e.key === "ArrowRight" && app.current?.next) {
+      } else if (e.altKey && e.key === "ArrowDown" && app.current?.next) {
+        e.preventDefault();
         app.open(app.current.next);
       }
     };
     window.addEventListener("keydown", keys);
+    // Mouse back / forward buttons.
+    const mouse = (e: MouseEvent) => {
+      if (e.button === 3 || e.button === 4) {
+        e.preventDefault();
+        e.button === 3 ? app.goBack() : app.goForward();
+      }
+    };
+    window.addEventListener("mouseup", mouse);
     setTimeout(() => sidebar?.focusSearch(), 50);
     return () => {
       window.removeEventListener("keydown", keys);
+      window.removeEventListener("mouseup", mouse);
       window.removeEventListener("focus", windowFocused);
       unsubs.forEach((u) => u());
     };

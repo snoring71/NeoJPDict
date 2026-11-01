@@ -45,7 +45,7 @@
       <button class="group-head" onclick={() => (collapsed[g.dictId] = !collapsed[g.dictId])}>
         <DictBadge title={d?.title ?? "?"} />
         <span class="group-title">{d?.title}</span>
-        <span class="count">{t("headwordCount", { n: g.hits.length })}</span>
+        <span class="count">{g.hits.length === 1 ? t("headwordCountOne") : t("headwordCount", { n: g.hits.length })}</span>
       </button>
     {/if}
     {#if !collapsed[g.dictId]}
