@@ -13,6 +13,8 @@ class AppStore {
   group = $state(""); // "" = all
   hits: SearchHit[] = $state([]);
   searching = $state(false);
+  /** "Did you mean" candidates when a search finds nothing. */
+  suggestions: string[] = $state([]);
   selected: SearchHit | null = $state(null);
   current: EntryView | null = $state(null);
   /** Writing mode override for the entry on screen (toggled from the header). */
@@ -73,6 +75,11 @@ class AppStore {
       const hits = await api.search({ text, mode, dictIds, limit: 300, deinflect: true });
       if (seq !== this.searchSeq) return; // a newer search started while this one ran
       this.hits = hits;
+      this.suggestions = [];
+      if (hits.length === 0 && (this.target === "headwords" || this.target === "idioms")) {
+        const s = await api.suggest(text, dictIds).catch(() => []);
+        if (seq === this.searchSeq) this.suggestions = s;
+      }
       // Show the first hit straight away, as 辞書 does.
       if (hits.length > 0 && (!this.selected || !hits.some((h) => h.termId === this.selected!.termId))) {
         await this.open(hits[0], false);

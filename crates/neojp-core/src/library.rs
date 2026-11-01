@@ -169,6 +169,8 @@ pub enum MatchMode {
     Idiom,
     /// Example sentences (用例, text in 「」) that contain the query.
     Example,
+    /// Regular expression over headwords and readings (パターン検索).
+    Regex,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -251,6 +253,9 @@ pub struct HistoryItem {
     pub folder: String,
     #[serde(default)]
     pub note: String,
+    /// How many times the entry was looked up.
+    #[serde(default)]
+    pub views: i64,
 }
 
 pub struct Library {
@@ -280,8 +285,34 @@ impl Library {
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch(crate::fulltext::SCHEMA)?;
         conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        Self::register_functions(&conn)?;
+        // Lookup counts in history (added after the first release).
+        let has_views: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('history') WHERE name='views'")?
+            .exists([])?;
+        if !has_views {
+            conn.execute_batch("ALTER TABLE history ADD COLUMN views INTEGER NOT NULL DEFAULT 1")?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self { conn })
+    }
+
+    /// `x REGEXP pattern`, with the compiled pattern cached per statement.
+    fn register_functions(conn: &Connection) -> Result<()> {
+        use rusqlite::functions::FunctionFlags;
+        conn.create_scalar_function(
+            "regexp",
+            2,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| {
+                let re = ctx.get_or_create_aux(0, |v| -> std::result::Result<regex::Regex, Box<dyn std::error::Error + Send + Sync>> {
+                    Ok(regex::RegexBuilder::new(v.as_str()?).size_limit(1 << 20).build()?)
+                })?;
+                let text = ctx.get_raw(1).as_str().unwrap_or("");
+                Ok(re.is_match(text))
+            },
+        )?;
+        Ok(())
     }
 
     pub fn connection(&self) -> &Connection {
@@ -560,7 +591,7 @@ impl Library {
         }
 
         // Wildcards: * for any run of characters, ? for exactly one.
-        let wildcard = key.contains(['*', '?']);
+        let wildcard = q.mode != MatchMode::Regex && key.contains(['*', '?']);
         let (sql_cond, arg) = if wildcard {
             ("(expr_key GLOB ?1 OR reading_key GLOB ?1)", key.replace(['[', ']'], ""))
         } else { match q.mode {
@@ -587,6 +618,12 @@ impl Library {
                      + instr(expr_key, 'ば') + instr(expr_key, 'ぬ') + instr(expr_key, 'ず') + instr(expr_key, 'へ')) > 0)",
                 key.clone(),
             ),
+            MatchMode::Regex => {
+                if regex::Regex::new(q.text.trim()).is_err() {
+                    return Ok(vec![]);
+                }
+                ("(expression REGEXP ?1 OR reading REGEXP ?1 OR reading_key REGEXP ?1)", q.text.trim().to_string())
+            }
             MatchMode::FullText | MatchMode::Example => unreachable!(),
         } };
         let rows = self.query_terms(sql_cond, &arg, &id_list, q.limit)?;
@@ -618,6 +655,77 @@ impl Library {
             enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
         hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
         Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect())
+    }
+
+    /// "Did you mean": headwords one character away from `text` (one substituted,
+    /// dropped or added character, or a long/short vowel or small kana variant).
+    pub fn suggest(&self, text: &str, dict_ids: &[i64], limit: usize) -> Result<Vec<String>> {
+        let key = kana::search_key(text.trim());
+        let chars: Vec<char> = key.chars().collect();
+        if chars.len() < 2 || key.contains(['*', '?', '[', ']']) {
+            return Ok(vec![]);
+        }
+        let ids = if dict_ids.is_empty() {
+            self.dictionaries()?.into_iter().filter(|d| d.enabled).map(|d| d.id).collect::<Vec<_>>()
+        } else {
+            dict_ids.to_vec()
+        };
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let id_list = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        let mut patterns: Vec<String> = vec![];
+        let s = |v: &[char]| v.iter().collect::<String>();
+        // Most likely slips first: small/large kana (じしよ → じしょ), then a dropped,
+        // changed or extra character. The first character stays fixed so every
+        // pattern can use the index.
+        const SMALL: &[(char, char)] = &[
+            ('あ', 'ぁ'), ('い', 'ぃ'), ('う', 'ぅ'), ('え', 'ぇ'), ('お', 'ぉ'), ('つ', 'っ'),
+            ('や', 'ゃ'), ('ゆ', 'ゅ'), ('よ', 'ょ'), ('わ', 'ゎ'),
+        ];
+        for i in 1..chars.len() {
+            if let Some(&(big, small)) = SMALL.iter().find(|(b, sm)| *b == chars[i] || *sm == chars[i]) {
+                let mut v = chars.clone();
+                v[i] = if chars[i] == big { small } else { big };
+                patterns.push(s(&v));
+            }
+        }
+        for i in 1..chars.len() {
+            let mut v = chars.clone();
+            v.remove(i);
+            patterns.push(s(&v));
+        }
+        for i in 1..chars.len() {
+            let mut v = chars.clone();
+            v[i] = '?';
+            patterns.push(s(&v));
+        }
+        for i in 1..=chars.len() {
+            let mut v = chars.clone();
+            v.insert(i, '?');
+            patterns.push(s(&v));
+        }
+        let mut out: Vec<String> = vec![];
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT expression, reading FROM terms
+             WHERE (reading_key GLOB ?1 OR expr_key GLOB ?1) AND +dict_id IN ({id_list}) AND kind='term'
+             ORDER BY score DESC LIMIT 8"
+        ))?;
+        for p in patterns {
+            let rows = st.query_map([&p], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (expr, reading) = row?;
+                let word = if kana::search_key(&expr) == key || expr.is_empty() { reading } else { expr };
+                if !word.is_empty() && kana::search_key(&word) != key && !out.contains(&word) {
+                    out.push(word);
+                }
+            }
+            if out.len() >= limit {
+                break;
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
     }
 
     /// Does the entry have an example (text in 「」 or『』) containing `key`? A dash standing
@@ -924,11 +1032,17 @@ impl Library {
             [term_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
-        // Re-opening the same entry moves it to the top instead of duplicating it.
+        // Re-opening the same entry moves it to the top instead of duplicating it,
+        // and counts how often it was looked up.
+        let views: i64 = self
+            .conn
+            .query_row("SELECT views FROM history WHERE term_id=?1", [term_id], |r| r.get(0))
+            .optional()?
+            .unwrap_or(0);
         self.conn.execute("DELETE FROM history WHERE term_id=?1", [term_id])?;
         self.conn.execute(
-            "INSERT INTO history (term_id, dict_id, expression, reading) VALUES (?1, ?2, ?3, ?4)",
-            params![term_id, dict_id, expression, reading],
+            "INSERT INTO history (term_id, dict_id, expression, reading, views) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![term_id, dict_id, expression, reading, views + 1],
         )?;
         self.conn.execute(
             "DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 2000)",
@@ -939,7 +1053,7 @@ impl Library {
 
     pub fn history(&self, limit: usize) -> Result<Vec<HistoryItem>> {
         self.list_items(
-            "SELECT id, term_id, dict_id, expression, reading, viewed_at, '', '' FROM history ORDER BY id DESC LIMIT ?1",
+            "SELECT id, term_id, dict_id, expression, reading, viewed_at, '', '', views FROM history ORDER BY id DESC LIMIT ?1",
             limit,
         )
     }
@@ -988,7 +1102,9 @@ impl Library {
 
     pub fn bookmarks(&self) -> Result<Vec<HistoryItem>> {
         self.list_items(
-            "SELECT id, term_id, dict_id, expression, reading, created_at, folder, note FROM bookmarks ORDER BY id DESC LIMIT ?1",
+            "SELECT b.id, b.term_id, b.dict_id, b.expression, b.reading, b.created_at, b.folder, b.note,
+                    coalesce((SELECT views FROM history h WHERE h.term_id = b.term_id), 0)
+             FROM bookmarks b ORDER BY b.id DESC LIMIT ?1",
             100_000,
         )
     }
@@ -1005,6 +1121,7 @@ impl Library {
                 at: r.get(5)?,
                 folder: r.get(6)?,
                 note: r.get(7)?,
+                views: r.get(8)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)

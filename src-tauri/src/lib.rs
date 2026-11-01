@@ -94,6 +94,11 @@ fn spawn_indexer(app: AppHandle) {
 }
 
 #[tauri::command]
+fn suggest(state: State<AppState>, text: String, dict_ids: Vec<i64>) -> CmdResult<Vec<String>> {
+    state.lib.lock().unwrap().suggest(&text, &dict_ids, 10).map_err(err)
+}
+
+#[tauri::command]
 fn fulltext_ready(state: State<AppState>) -> CmdResult<Vec<i64>> {
     state.lib.lock().unwrap().fulltext_ready().map_err(err)
 }
@@ -375,6 +380,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_dictionaries,
             fulltext_ready,
+            suggest,
             search,
             get_entry,
             get_entry_at,

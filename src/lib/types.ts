@@ -1,4 +1,4 @@
-export type HeadwordMode = "exact" | "prefix" | "suffix" | "contains";
+export type HeadwordMode = "exact" | "prefix" | "suffix" | "contains" | "regex";
 export type MatchMode = HeadwordMode | "fullText" | "idiom" | "example";
 export type WritingMode = "auto" | "vertical" | "horizontal";
 
@@ -78,6 +78,7 @@ export interface HistoryItem {
   at: string;
   folder?: string;
   note?: string;
+  views?: number;
 }
 
 export interface ImportEvent {

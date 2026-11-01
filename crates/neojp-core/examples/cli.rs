@@ -29,6 +29,7 @@ fn main() -> neojp_core::Result<()> {
                 Some("fulltext") => MatchMode::FullText,
                 Some("idiom") => MatchMode::Idiom,
                 Some("example") => MatchMode::Example,
+                Some("regex") => MatchMode::Regex,
                 _ => MatchMode::Exact,
             };
             let t = std::time::Instant::now();
@@ -48,6 +49,11 @@ fn main() -> neojp_core::Result<()> {
             let store = epwing::EpwingStore::default();
             let e = lib.entry(args[3].parse().unwrap(), Some(&store))?;
             println!("{} {} {}\n{}", e.dict_title, e.reading, e.expression, e.html);
+        }
+        "suggest" => {
+            let t = std::time::Instant::now();
+            let s = lib.suggest(&args[3], &[], 10)?;
+            eprintln!("{s:?} in {:.1?}", t.elapsed());
         }
         "index" => {
             let store = epwing::EpwingStore::default();

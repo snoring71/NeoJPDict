@@ -12,7 +12,7 @@
   let recentOpen = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const modes: HeadwordMode[] = ["prefix", "exact", "suffix", "contains"];
+  const modes: HeadwordMode[] = ["prefix", "exact", "suffix", "contains", "regex"];
 
   function typed() {
     clearTimeout(timer);
@@ -165,6 +165,14 @@
     <div class="list">
       {#if app.query.trim() && !app.searching && app.hits.length === 0}
         <p class="muted pad">{t("noResults")}</p>
+        {#if app.suggestions.length}
+          <div class="suggest">
+            <span class="muted">{t("didYouMean")}</span>
+            {#each app.suggestions as s}
+              <button class="chip" onclick={() => app.searchFor(s)}>{s}</button>
+            {/each}
+          </div>
+        {/if}
       {/if}
       <ResultList hits={app.hits} onpick={(h) => app.open(h)} />
     </div>
@@ -178,7 +186,13 @@
       {#if app.history.length === 0}<p class="muted pad">{t("noHistory")}</p>{/if}
       {#each historyDays as day (day.label)}
         <div class="day">{day.label}</div>
-        <ResultList hits={day.items.map((h) => ({ ...h, deinflection: null }))} grouped={false} onpick={(h) => app.openTerm(h.termId)} />
+        {#each day.items as h (h.id)}
+          <button class="mark-row" class:selected={app.selected?.termId === h.termId} onclick={() => app.openTerm(h.termId)}>
+            <DictBadge title={app.dict(h.dictId)?.title ?? "?"} size={18} />
+            <span class="mark-text"><span class="mark-hw">{h.reading && h.reading !== h.expression ? `${h.reading}【${h.expression}】` : h.expression}</span></span>
+            {#if (h.views ?? 1) > 1}<span class="views" title={t("lookups", { n: h.views ?? 1 })}>{h.views}</span>{/if}
+          </button>
+        {/each}
       {/each}
     </div>
   {:else if app.view === "bookmarks"}
@@ -400,6 +414,34 @@
   .mark-row.selected {
     background: var(--accent);
     color: var(--on-accent);
+  }
+  .views {
+    margin-left: auto;
+    align-self: center;
+    min-width: 1.6em;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--selected);
+    font-size: 11px;
+    text-align: center;
+  }
+  .suggest {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    font-size: 13px;
+  }
+  .suggest .chip {
+    border: 1px solid var(--divider-strong);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--accent-text);
+    font: inherit;
+    font-family: var(--font-ui-jp);
+    padding: 2px 10px;
+    cursor: pointer;
   }
   .mark-text {
     display: flex;

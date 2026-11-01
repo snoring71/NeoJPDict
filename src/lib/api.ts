@@ -27,6 +27,7 @@ export const api = {
   getEntryAt: (dictId: number, locator: string) => call<EntryView>("get_entry_at", { dictId, locator }),
   browse: (dictId: number, after: string | null, limit = 200, offset = 0) =>
     call<SearchHit[]>("browse", { dictId, after, limit, offset }),
+  suggest: (text: string, dictIds: number[]) => call<string[]>("suggest", { text, dictIds }),
   specialPages: (dictId: number) => call<{ kind: string; locator: string }[]>("special_pages", { dictId }),
   history: (limit = 500) => call<HistoryItem[]>("history", { limit }),
   clearHistory: () => call<void>("clear_history"),
