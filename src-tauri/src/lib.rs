@@ -207,6 +207,18 @@ fn export_bookmarks(state: State<AppState>, path: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+fn backup_userdata(state: State<AppState>, path: String) -> CmdResult<()> {
+    let json = state.lib.lock().unwrap().backup_userdata().map_err(err)?;
+    std::fs::write(path, json).map_err(err)
+}
+
+#[tauri::command]
+fn restore_userdata(state: State<AppState>, path: String) -> CmdResult<neojp_core::userdata::RestoreSummary> {
+    let json = std::fs::read_to_string(path).map_err(err)?;
+    state.lib.lock().unwrap().restore_userdata(&json).map_err(err)
+}
+
+#[tauri::command]
 fn delete_dictionary(state: State<AppState>, id: i64) -> CmdResult<()> {
     state.lib.lock().unwrap().delete_dictionary(id).map_err(err)
 }
@@ -452,6 +464,8 @@ pub fn run() {
             remove_marker,
             update_bookmark,
             export_bookmarks,
+            backup_userdata,
+            restore_userdata,
             delete_dictionary,
             update_dictionary,
             reorder_dictionaries,

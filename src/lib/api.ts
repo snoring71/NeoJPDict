@@ -38,6 +38,9 @@ export const api = {
   setBookmark: (termId: number, on: boolean) => call<void>("set_bookmark", { termId, on }),
   updateBookmark: (termId: number, folder: string, note: string) => call<void>("update_bookmark", { termId, folder, note }),
   exportBookmarks: (path: string) => call<void>("export_bookmarks", { path }),
+  backupUserdata: (path: string) => call<void>("backup_userdata", { path }),
+  restoreUserdata: (path: string) =>
+    call<{ bookmarks: number; markers: number; history: number; missing: number }>("restore_userdata", { path }),
   deleteDictionary: (id: number) => call<void>("delete_dictionary", { id }),
   updateDictionary: (id: number, enabled: boolean, groupName: string, writingMode: WritingMode) =>
     call<void>("update_dictionary", { id, enabled, groupName, writingMode }),
@@ -117,6 +120,18 @@ export async function pickCsvSavePath(): Promise<string | null> {
   if (!inTauri) return null;
   const { save } = await import("@tauri-apps/plugin-dialog");
   return save({ defaultPath: "bookmarks.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
+}
+
+export async function pickBackupPath(save: boolean): Promise<string | null> {
+  if (!inTauri) return null;
+  const dialog = await import("@tauri-apps/plugin-dialog");
+  const filters = [{ name: "NeoJPDict backup", extensions: ["json"] }];
+  if (save) {
+    const day = new Date().toISOString().slice(0, 10);
+    return dialog.save({ defaultPath: `NeoJPDict-backup-${day}.json`, filters });
+  }
+  const r = await dialog.open({ multiple: false, filters });
+  return typeof r === "string" ? r : null;
 }
 
 export async function readClipboard(): Promise<string | null> {

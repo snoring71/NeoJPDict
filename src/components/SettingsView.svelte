@@ -1,7 +1,33 @@
 <script lang="ts">
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
-  import { setGlobalShortcut } from "../lib/api";
+  import { api, pickBackupPath, setGlobalShortcut } from "../lib/api";
+  import { app } from "../lib/store.svelte";
+
+  let backupNote = $state("");
+
+  async function backup() {
+    const path = await pickBackupPath(true);
+    if (!path) return;
+    try {
+      await api.backupUserdata(path);
+      backupNote = t("backupSaved");
+    } catch (e) {
+      backupNote = String(e);
+    }
+  }
+
+  async function restore() {
+    const path = await pickBackupPath(false);
+    if (!path) return;
+    try {
+      const s = await api.restoreUserdata(path);
+      backupNote = t("restoreDone", { b: s.bookmarks, m: s.markers, h: s.history, x: s.missing });
+      await Promise.all([app.loadBookmarks(), app.loadHistory()]);
+    } catch (e) {
+      backupNote = String(e);
+    }
+  }
 
   let recording = $state(false);
   let shortcutError = $state("");
@@ -103,6 +129,15 @@
         {#if settings.globalShortcut}<button onclick={() => apply("")}>{t("off")}</button>{/if}
       </div>
       <span class="hint">{shortcutError || t("globalShortcutHint")}</span>
+    </div>
+
+    <span class="label">{t("backup")}</span>
+    <div class="gs">
+      <div class="gs-row">
+        <button onclick={backup}>{t("backupSave")}</button>
+        <button onclick={restore}>{t("backupRestore")}</button>
+      </div>
+      <span class="hint">{backupNote || t("backupHint")}</span>
     </div>
 
     <label for="s-size">{t("fontSize")}</label>
