@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { app } from "../lib/store.svelte";
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
-  import { mediaBase } from "../lib/api";
-  import { adaptHtml, logicalStyles } from "../lib/layout";
+  import { api, mediaBase, writeClipboard } from "../lib/api";
+  import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
 
@@ -12,6 +13,9 @@
 
   const view = $derived(app.current);
   const entry = $derived(view?.entry);
+  /** The dictionary's own font choice, if it has one, else the app setting. */
+  const dictFont = $derived((entry && app.dict(entry.dictId)?.font) || "");
+  const fontKind = $derived(dictFont === "mincho" || dictFont === "gothic" ? dictFont : dictFont ? "custom" : settings.font);
 
   /** Vertical unless the dictionary, the user or the content says otherwise. */
   const vertical = $derived.by(() => {
@@ -50,6 +54,82 @@
     entry ? app.hits.filter((h) => h.expression === entry.expression && h.termId !== entry.termId) : [],
   );
 
+  // Bookmark folder and note.
+  let markOpen = $state(false);
+  let markFolder = $state("");
+  let markNote = $state("");
+
+  async function bookmarkClick() {
+    if (!entry) return;
+    if (!entry.bookmarked) {
+      await app.toggleBookmark();
+      return;
+    }
+    if (app.bookmarks.length === 0) await app.loadBookmarks();
+    const b = app.bookmarks.find((x) => x.termId === entry!.termId);
+    markFolder = b?.folder ?? "";
+    markNote = b?.note ?? "";
+    markOpen = !markOpen;
+  }
+
+  async function saveMark() {
+    if (!entry) return;
+    await api.updateBookmark(entry.termId, markFolder, markNote);
+    await app.loadBookmarks();
+    markOpen = false;
+  }
+
+  async function removeMark() {
+    markOpen = false;
+    await app.toggleBookmark();
+  }
+
+  // Find in entry (Ctrl+F) and the highlight of the searched text.
+  let findOpen = $state(false);
+  let findText = $state("");
+  let findInput: HTMLInputElement | undefined = $state();
+  let findMarks: HTMLElement[] = [];
+  let findIndex = $state(0);
+  let findCount = $state(0);
+
+  export function openFind() {
+    findOpen = true;
+    queueMicrotask(() => findInput?.select());
+  }
+
+  function closeFind() {
+    findOpen = false;
+    findText = "";
+  }
+
+  function showFind(i: number) {
+    if (findMarks.length === 0) return;
+    findIndex = (i + findMarks.length) % findMarks.length;
+    findMarks.forEach((m, j) => m.classList.toggle("current", j === findIndex));
+    findMarks[findIndex].scrollIntoView({ block: "center", inline: "center" });
+  }
+
+  function findKey(e: KeyboardEvent) {
+    if (e.key === "Enter") showFind(findIndex + (e.shiftKey ? -1 : 1));
+    else if (e.key === "Escape") closeFind();
+  }
+
+  $effect(() => {
+    body.html;
+    const query = findOpen && findText ? findText : app.highlight;
+    const fromFind = findOpen && !!findText;
+    if (!scroller) return;
+    queueMicrotask(() => {
+      const root = scroller!.querySelector<HTMLElement>(".entry");
+      if (!root) return;
+      clearMarks(root, "nj-hit");
+      findMarks = query ? markText(root, query, "nj-hit") : [];
+      findCount = findMarks.length;
+      findIndex = 0;
+      if (findMarks.length && (fromFind || app.highlight)) showFind(0);
+    });
+  });
+
   $effect(() => {
     // Horizontal symbol runs (＊＊, ←→) in vertical text must fit the column like 縦中横.
     body.html;
@@ -80,7 +160,13 @@
   });
 
   function wheel(e: WheelEvent) {
-    if (!vertical || !scroller || e.ctrlKey) return;
+    if (e.ctrlKey) {
+      // Ctrl+wheel resizes the entry text, as in a browser.
+      e.preventDefault();
+      if (Math.abs(e.deltaY) > 0) size(e.deltaY < 0 ? 1 : -1);
+      return;
+    }
+    if (!vertical || !scroller) return;
     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
       e.preventDefault();
       scroller.scrollLeft -= e.deltaY;
@@ -91,18 +177,183 @@
     const a = (e.target as HTMLElement).closest("a");
     if (!a) return;
     e.preventDefault();
+    const sound = a.getAttribute("data-sound");
+    if (sound) {
+      new Audio(sound).play().catch(() => {});
+      return;
+    }
     const q = a.getAttribute("data-query");
     if (q) app.searchFor(q);
     const ep = a.getAttribute("data-ep");
     if (ep && entry) app.openAt(entry.dictId, ep);
   }
 
-  function size(d: number) {
+  // Copy / print
+  let moreOpen = $state(false);
+  let copied = $state("");
+
+  /** The entry's visible text, without ruby readings. */
+  function entryText(): string {
+    const article = scroller?.querySelector("article");
+    if (!article) return "";
+    const clone = article.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("rt, rp, style, .freq").forEach((n) => n.remove());
+    // innerText needs layout to place line breaks, so measure it off-screen.
+    clone.style.cssText = "position:fixed;left:-99999px;top:0;writing-mode:horizontal-tb;white-space:normal";
+    document.body.append(clone);
+    const text = clone.innerText.replace(/\n{3,}/g, "\n\n").trim();
+    clone.remove();
+    return text;
+  }
+
+  async function copy(kind: "headword" | "text") {
+    moreOpen = false;
+    if (!entry) return;
+    const text = kind === "headword" ? entry.expression : `${entryText()}\n\n— ${entry.dictTitle}`;
+    await writeClipboard(text);
+    copied = kind;
+    setTimeout(() => (copied = ""), 1500);
+  }
+
+  /** Print the entry. Paged vertical text prints poorly, so it prints horizontally. */
+  async function printEntry() {
+    moreOpen = false;
+    const saved = app.directionOverride;
+    if (vertical) {
+      app.directionOverride = "horizontal";
+      await tick();
+    }
+    const restore = () => {
+      app.directionOverride = saved;
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.print();
+  }
+
+  // なぞってジャンプ: select text in the entry to look it up or mark it.
+  let pick: { text: string; x: number; y: number; markerId?: number } | null = $state(null);
+
+  // Highlighter marks (マーカー) saved with the entry.
+  let markers: { id: number; text: string; color: string }[] = $state([]);
+  const MARKER_COLORS = ["yellow", "pink", "blue", "green"];
+
+  $effect(() => {
+    const id = entry?.termId;
+    markers = [];
+    if (id) api.markers(id).then((m) => { if (entry?.termId === id) markers = m; }).catch(() => {});
+  });
+
+  $effect(() => {
+    body.html;
+    const list = markers;
+    if (!scroller) return;
+    queueMicrotask(() => {
+      const root = scroller!.querySelector<HTMLElement>(".entry");
+      if (!root) return;
+      clearMarks(root, "nj-hl");
+      for (const m of list) markText(root, m.text, "nj-hl", { "data-marker": String(m.id), "data-color": m.color });
+    });
+  });
+
+  async function addMarker(color: string) {
+    if (!pick || !entry?.termId) return;
+    const text = pick.text;
+    pick = null;
+    window.getSelection()?.removeAllRanges();
+    const id = await api.addMarker(entry.termId, text, color);
+    markers = [...markers, { id, text, color }];
+  }
+
+  async function removeMarker() {
+    if (!pick?.markerId) return;
+    const id = pick.markerId;
+    pick = null;
+    await api.removeMarker(id);
+    markers = markers.filter((m) => m.id !== id);
+  }
+
+  /** Selected text without ruby readings. */
+  function selectedText(sel: Selection): string {
+    const box = document.createElement("div");
+    box.append(sel.getRangeAt(0).cloneContents());
+    box.querySelectorAll("rt, rp").forEach((n) => n.remove());
+    return (box.textContent ?? "").replace(/\s+/g, "").trim();
+  }
+
+  /** Ctrl+C in an entry copies the text without ruby readings (椅子, not 椅子いす). */
+  function copySelection(e: ClipboardEvent) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !e.clipboardData) return;
+    const box = document.createElement("div");
+    box.append(sel.getRangeAt(0).cloneContents());
+    box.querySelectorAll("rt, rp").forEach((n) => n.remove());
+    // innerText keeps line breaks between blocks; it needs the box in the document.
+    box.style.cssText = "position:fixed;left:-99999px;top:0;writing-mode:horizontal-tb";
+    document.body.append(box);
+    const text = box.innerText;
+    box.remove();
+    e.clipboardData.setData("text/plain", text);
+    e.preventDefault();
+  }
+
+  function selectionDone(e: MouseEvent) {
+    setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel && sel.rangeCount > 0 && !sel.isCollapsed ? selectedText(sel) : "";
+      if (!sel || !text || text.length > 200 || !scroller?.contains(sel.anchorNode)) {
+        // A click on a marker offers to remove it.
+        const m = (e.target as HTMLElement).closest?.<HTMLElement>("mark.nj-hl");
+        if (m && !text) {
+          const r = m.getBoundingClientRect();
+          const id = Number(m.dataset.marker);
+          pick = { text: markers.find((x) => x.id === id)?.text ?? "", x: r.left + r.width / 2, y: r.bottom + 6, markerId: id };
+          return;
+        }
+        pick = null;
+        return;
+      }
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      pick = { text, x: r.left + r.width / 2, y: r.bottom + 6 };
+    }, 0);
+  }
+
+  function lookUpPick() {
+    if (!pick) return;
+    const text = pick.text;
+    pick = null;
+    window.getSelection()?.removeAllRanges();
+    app.target = "headwords";
+    app.searchFor(text);
+  }
+
+  export function size(d: number) {
     settings.fontSize = Math.max(12, Math.min(40, settings.fontSize + d));
     saveSettings();
   }
 
-  function toggleDirection() {
+  /**
+   * Page through the entry from the keyboard. In vertical text the entry runs right to
+   * left, so "forward" scrolls left.
+   */
+  export function page(dir: 1 | -1, whole = true) {
+    if (!scroller) return;
+    if (vertical) {
+      const step = whole ? scroller.clientWidth * 0.9 : 60;
+      scroller.scrollBy({ left: -dir * step, behavior: "smooth" });
+    } else {
+      const step = whole ? scroller.clientHeight * 0.9 : 60;
+      scroller.scrollBy({ top: dir * step, behavior: "smooth" });
+    }
+  }
+
+  export function toEnd(end: boolean) {
+    if (!scroller) return;
+    if (vertical) scroller.scrollTo({ left: end ? -scroller.scrollWidth : 0 });
+    else scroller.scrollTo({ top: end ? scroller.scrollHeight : 0 });
+  }
+
+  export function toggleDirection() {
     app.directionOverride = vertical ? "horizontal" : "vertical";
   }
 
@@ -149,6 +400,10 @@
 <section class="reader" aria-label={entry?.dictTitle}>
   {#if view && entry}
     <header class="entry-bar">
+      <div class="history-nav">
+        <button class="icon" title={t("back")} aria-label={t("back")} disabled={app.backStack.length === 0} onclick={() => app.goBack()}><Icon name="left" /></button>
+        <button class="icon" title={t("forward")} aria-label={t("forward")} disabled={app.forwardStack.length === 0} onclick={() => app.goForward()}><Icon name="right" /></button>
+      </div>
       <div class="title-wrap">
         <button class="title" onclick={() => (menuOpen = !menuOpen)} disabled={siblings.length === 0}>
           <DictBadge title={entry.dictTitle} size={24} />
@@ -167,14 +422,55 @@
         {/if}
       </div>
       <div class="actions">
+        {#if findOpen}
+          <div class="find">
+            <input
+              bind:this={findInput}
+              bind:value={findText}
+              onkeydown={findKey}
+              placeholder={t("findInEntry")}
+              aria-label={t("findInEntry")} />
+            <span class="find-count">{findText ? `${findCount ? findIndex + 1 : 0}/${findCount}` : ""}</span>
+            <button class="icon" title={t("close")} onclick={closeFind}><Icon name="close" size={14} /></button>
+          </div>
+        {:else}
+          <button class="icon" title={t("findInEntry")} onclick={openFind}><Icon name="search" /></button>
+        {/if}
         <button class="icon" title={t("fontSize")} onclick={() => size(-2)}><Icon name="textSmaller" /></button>
         <button class="icon" title={t("fontSize")} onclick={() => size(2)}><Icon name="textLarger" /></button>
         <button class="icon" title={t("toggleDirection")} aria-pressed={vertical} onclick={toggleDirection}>
           <span class="dir">{vertical ? "縦" : "横"}</span>
         </button>
-        <button class="icon" class:on={entry.bookmarked} title={t("bookmark")} onclick={() => app.toggleBookmark()}>
-          <Icon name={entry.bookmarked ? "bookmarkFilled" : "bookmark"} />
-        </button>
+        <div class="mark-wrap">
+          <button class="icon" title={copied ? t("copied") : t("more")} aria-label={t("more")} onclick={() => (moreOpen = !moreOpen)}>
+            <Icon name={copied ? "check" : "more"} />
+          </button>
+          {#if moreOpen}
+            <div class="menu more-menu" role="menu">
+              <button role="menuitem" onclick={() => copy("headword")}>{t("copyHeadword")}</button>
+              <button role="menuitem" onclick={() => copy("text")}>{t("copyEntry")}</button>
+              <button role="menuitem" onclick={printEntry}>{t("print")}</button>
+            </div>
+          {/if}
+        </div>
+        <div class="mark-wrap">
+          <button class="icon" class:on={entry.bookmarked} title={t("bookmark")} onclick={bookmarkClick}>
+            <Icon name={entry.bookmarked ? "bookmarkFilled" : "bookmark"} />
+          </button>
+          {#if markOpen}
+            <div class="mark-pop" role="dialog" aria-label={t("bookmark")}>
+              <label>{t("folder")}<input list="nj-folders" bind:value={markFolder} /></label>
+              <datalist id="nj-folders">
+                {#each [...new Set(app.bookmarks.map((b) => b.folder).filter(Boolean))] as f}<option value={f}></option>{/each}
+              </datalist>
+              <label>{t("note")}<textarea rows="3" bind:value={markNote}></textarea></label>
+              <div class="mark-actions">
+                <button class="text-btn danger" onclick={removeMark}>{t("removeBookmark")}</button>
+                <button class="text-btn" onclick={saveMark}>{t("done")}</button>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
     </header>
 
@@ -182,11 +478,15 @@
     <div
       class="scroller"
       class:vertical
-      class:gothic={settings.font === "gothic"}
-      style="--entry-size:{settings.fontSize}px"
+      class:gothic={fontKind === "gothic"}
+      class:no-ruby={!settings.ruby}
+      style="--entry-size:{settings.fontSize}px{fontKind === 'custom' ? `;font-family:'${dictFont.replace(/['\\;]/g, '')}', var(--font-mincho)` : ''}"
       bind:this={scroller}
       onwheel={wheel}
-      onclick={click}>
+      onclick={click}
+      onmouseup={selectionDone}
+      oncopy={copySelection}
+      onscroll={() => (pick = null)}>
       <article class="entry" lang="ja">
         {#if body.own}
           <!-- headline is part of the entry text -->
@@ -221,6 +521,26 @@
         {/if}
         <div class="entry-body">{@html body.html}</div>
       </article>
+      {#if pick}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="pick" style="left:{pick.x}px; top:{pick.y}px" onmousedown={(e) => e.preventDefault()} onclick={(e) => e.stopPropagation()}>
+          {#if pick.markerId}
+            <button class="pick-btn" onclick={removeMarker}><Icon name="close" size={14} />{t("removeMarker")}</button>
+          {:else}
+            {#if pick.text.length <= 40}
+              <button class="pick-btn" onclick={lookUpPick}>
+                <Icon name="search" size={14} />「{pick.text.length > 12 ? pick.text.slice(0, 12) + "…" : pick.text}」{t("lookUp")}
+              </button>
+            {/if}
+            {#if entry.termId}
+              <span class="pick-sep"></span>
+              {#each MARKER_COLORS as c}
+                <button class="swatch" data-color={c} title={t("addMarker")} aria-label="{t('addMarker')} ({c})" onclick={() => addMarker(c)}></button>
+              {/each}
+            {/if}
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <footer class="nav">
@@ -264,6 +584,16 @@
     border-bottom: 1px solid var(--divider);
     flex: none;
   }
+  .history-nav {
+    display: flex;
+    flex: none;
+    gap: 0;
+    margin-inline-end: 2px;
+  }
+  .history-nav .icon:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
   .title-wrap {
     position: relative;
   }
@@ -282,6 +612,7 @@
   }
   .title:disabled {
     cursor: default;
+    opacity: 1;
   }
   .title:not(:disabled):hover {
     background: var(--hover);
@@ -318,6 +649,32 @@
   .menu button:hover {
     background: var(--hover);
   }
+  .no-ruby :global(rt),
+  .no-ruby :global(rp) {
+    display: none;
+  }
+  .more-menu {
+    left: auto;
+    right: 0;
+    transform: none;
+    min-width: 200px;
+    top: calc(100% + 6px);
+    z-index: 20;
+  }
+  @media print {
+    .entry-bar,
+    footer.nav,
+    .pick,
+    .find {
+      display: none !important;
+    }
+    .scroller {
+      overflow: visible !important;
+      height: auto !important;
+      padding: 0 !important;
+      color: #000 !important;
+    }
+  }
   .actions {
     position: absolute;
     right: 12px;
@@ -341,7 +698,7 @@
     font-family: var(--font-mincho);
     font-size: var(--entry-size);
     line-height: 1.75;
-    color: var(--text-1);
+    color: var(--paper-text, var(--text-1));
   }
   .scroller.gothic {
     font-family: var(--font-gothic);
@@ -445,6 +802,24 @@
   .vertical .entry-body :global(.ep-gaiji) {
     vertical-align: baseline;
   }
+  .entry-body :global(.ep-sound) {
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .entry-body :global(.ep-sound-icon) {
+    font-size: 0.8em;
+    margin-inline: 0.1em;
+  }
+  /* Monochrome figures are black ink on clear: invert them on dark paper. */
+  :global(:root[data-theme="dark"]) .entry-body :global(.ep-mono),
+  :global(:root[data-paper="black"]) .entry-body :global(.ep-mono) {
+    filter: invert(1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]:not([data-paper="white"]):not([data-paper="cream"])) .entry-body :global(.ep-mono) {
+      filter: invert(1);
+    }
+  }
   .entry-body :global(.ep-img.inline) {
     height: 1em;
     vertical-align: -0.12em;
@@ -489,6 +864,158 @@
   .vertical .entry-body :global(.sc-img-inline) {
     /* Label images (表記, 派生…) are drawn for horizontal text; keep them upright and sized to the line. */
     writing-mode: horizontal-tb;
+  }
+  .entry :global(mark.nj-hit) {
+    background: rgb(255 214 10 / 0.45);
+    color: inherit;
+    border-radius: 2px;
+  }
+  .entry :global(mark.nj-hit.current) {
+    background: rgb(255 149 0 / 0.75);
+  }
+  .pick {
+    position: fixed;
+    transform: translateX(-50%);
+    z-index: 15;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    writing-mode: horizontal-tb;
+    white-space: nowrap;
+    padding: 3px 8px;
+    border-radius: 16px;
+    border: 1px solid var(--divider);
+    background: var(--flyout);
+    color: var(--text-1);
+    box-shadow: var(--shadow);
+    font-family: var(--font-ui-jp);
+    font-size: 13px;
+  }
+  .pick-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    padding: 2px 4px;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .pick-btn:hover {
+    background: var(--hover);
+  }
+  .pick-sep {
+    width: 1px;
+    align-self: stretch;
+    background: var(--divider);
+  }
+  .swatch {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgb(0 0 0 / 0.15);
+    cursor: pointer;
+  }
+  .swatch[data-color="yellow"],
+  .entry :global(mark.nj-hl[data-color="yellow"]) {
+    background: rgb(255 224 80 / 0.55);
+  }
+  .swatch[data-color="pink"],
+  .entry :global(mark.nj-hl[data-color="pink"]) {
+    background: rgb(255 120 170 / 0.45);
+  }
+  .swatch[data-color="blue"],
+  .entry :global(mark.nj-hl[data-color="blue"]) {
+    background: rgb(100 170 255 / 0.45);
+  }
+  .swatch[data-color="green"],
+  .entry :global(mark.nj-hl[data-color="green"]) {
+    background: rgb(110 210 120 / 0.45);
+  }
+  .entry :global(mark.nj-hl) {
+    color: inherit;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .mark-wrap {
+    position: relative;
+  }
+  .mark-pop {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    width: 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--divider-strong);
+    background: var(--flyout);
+    box-shadow: var(--shadow);
+  }
+  .mark-pop label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .mark-pop input,
+  .mark-pop textarea {
+    border: 1px solid var(--divider-strong);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 6px;
+    resize: vertical;
+  }
+  .mark-actions {
+    display: flex;
+    justify-content: space-between;
+  }
+  .text-btn {
+    border: 0;
+    background: transparent;
+    color: var(--accent-text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .text-btn.danger {
+    color: var(--label-red, #c33);
+  }
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--divider-strong);
+    border-radius: 6px;
+    padding: 0 2px 0 8px;
+    background: var(--field);
+  }
+  .find input {
+    width: 88px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+    padding: 3px 0;
+  }
+  .find-count {
+    font-size: 11.5px;
+    color: var(--text-2);
+    min-width: 2.5em;
+    text-align: right;
   }
   .entry-body :global(.nj-turn) {
     display: inline-block;

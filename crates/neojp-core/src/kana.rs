@@ -144,3 +144,107 @@ mod tests {
         assert_eq!(to_hiragana("ジショ"), "じしょ");
     }
 }
+
+/// Romaji syllables (Hepburn, Kunrei and IME spellings) in hiragana.
+const ROMAJI: &[(&str, &str)] = &[
+    ("a", "あ"), ("i", "い"), ("u", "う"), ("e", "え"), ("o", "お"),
+    ("ka", "か"), ("ki", "き"), ("ku", "く"), ("ke", "け"), ("ko", "こ"),
+    ("ga", "が"), ("gi", "ぎ"), ("gu", "ぐ"), ("ge", "げ"), ("go", "ご"),
+    ("sa", "さ"), ("si", "し"), ("shi", "し"), ("su", "す"), ("se", "せ"), ("so", "そ"),
+    ("za", "ざ"), ("zi", "じ"), ("ji", "じ"), ("zu", "ず"), ("ze", "ぜ"), ("zo", "ぞ"),
+    ("ta", "た"), ("ti", "ち"), ("chi", "ち"), ("tu", "つ"), ("tsu", "つ"), ("te", "て"), ("to", "と"),
+    ("da", "だ"), ("di", "ぢ"), ("du", "づ"), ("de", "で"), ("do", "ど"),
+    ("na", "な"), ("ni", "に"), ("nu", "ぬ"), ("ne", "ね"), ("no", "の"),
+    ("ha", "は"), ("hi", "ひ"), ("hu", "ふ"), ("fu", "ふ"), ("he", "へ"), ("ho", "ほ"),
+    ("ba", "ば"), ("bi", "び"), ("bu", "ぶ"), ("be", "べ"), ("bo", "ぼ"),
+    ("pa", "ぱ"), ("pi", "ぴ"), ("pu", "ぷ"), ("pe", "ぺ"), ("po", "ぽ"),
+    ("ma", "ま"), ("mi", "み"), ("mu", "む"), ("me", "め"), ("mo", "も"),
+    ("ya", "や"), ("yu", "ゆ"), ("yo", "よ"),
+    ("ra", "ら"), ("ri", "り"), ("ru", "る"), ("re", "れ"), ("ro", "ろ"),
+    ("la", "ら"), ("li", "り"), ("lu", "る"), ("le", "れ"), ("lo", "ろ"),
+    ("wa", "わ"), ("wi", "うぃ"), ("we", "うぇ"), ("wo", "を"),
+    ("kya", "きゃ"), ("kyu", "きゅ"), ("kyo", "きょ"), ("gya", "ぎゃ"), ("gyu", "ぎゅ"), ("gyo", "ぎょ"),
+    ("sya", "しゃ"), ("syu", "しゅ"), ("syo", "しょ"), ("sha", "しゃ"), ("shu", "しゅ"), ("sho", "しょ"), ("she", "しぇ"),
+    ("zya", "じゃ"), ("zyu", "じゅ"), ("zyo", "じょ"), ("ja", "じゃ"), ("ju", "じゅ"), ("jo", "じょ"), ("je", "じぇ"),
+    ("jya", "じゃ"), ("jyu", "じゅ"), ("jyo", "じょ"),
+    ("tya", "ちゃ"), ("tyu", "ちゅ"), ("tyo", "ちょ"), ("cha", "ちゃ"), ("chu", "ちゅ"), ("cho", "ちょ"), ("che", "ちぇ"),
+    ("cya", "ちゃ"), ("cyu", "ちゅ"), ("cyo", "ちょ"),
+    ("dya", "ぢゃ"), ("dyu", "ぢゅ"), ("dyo", "ぢょ"),
+    ("nya", "にゃ"), ("nyu", "にゅ"), ("nyo", "にょ"), ("hya", "ひゃ"), ("hyu", "ひゅ"), ("hyo", "ひょ"),
+    ("bya", "びゃ"), ("byu", "びゅ"), ("byo", "びょ"), ("pya", "ぴゃ"), ("pyu", "ぴゅ"), ("pyo", "ぴょ"),
+    ("mya", "みゃ"), ("myu", "みゅ"), ("myo", "みょ"), ("rya", "りゃ"), ("ryu", "りゅ"), ("ryo", "りょ"),
+    ("fa", "ふぁ"), ("fi", "ふぃ"), ("fe", "ふぇ"), ("fo", "ふぉ"),
+    ("ti", "ち"), ("thi", "てぃ"), ("dhi", "でぃ"), ("tsa", "つぁ"), ("va", "ゔぁ"), ("vi", "ゔぃ"), ("vu", "ゔ"), ("ve", "ゔぇ"), ("vo", "ゔぉ"),
+    ("xa", "ぁ"), ("xi", "ぃ"), ("xu", "ぅ"), ("xe", "ぇ"), ("xo", "ぉ"), ("xya", "ゃ"), ("xyu", "ゅ"), ("xyo", "ょ"), ("xtu", "っ"), ("xtsu", "っ"),
+    ("nn", "ん"), ("n'", "ん"), ("-", "ー"),
+];
+
+/// Convert romaji typed without an IME (`kakeru`, `shinbun`, `kitte`) to hiragana.
+/// Returns None if any part of the text is not romaji.
+pub fn romaji_to_hiragana(s: &str) -> Option<String> {
+    let s = s.trim().to_ascii_lowercase();
+    if s.is_empty() || !s.chars().all(|c| c.is_ascii_alphabetic() || c == '-' || c == '\'') {
+        return None;
+    }
+    let b = s.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    'outer: while i < b.len() {
+        // Doubled consonant: っ (but "nn" is ん).
+        if i + 1 < b.len() && b[i] == b[i + 1] && b[i].is_ascii_alphabetic() && !b"aeioun".contains(&b[i]) {
+            out.push('っ');
+            i += 1;
+            continue;
+        }
+        // Hepburn "tch" (matcha) is っ + ch.
+        if s[i..].starts_with("tch") {
+            out.push('っ');
+            i += 1;
+            continue;
+        }
+        // "nn" before a vowel is ん + な-row (konnichiha → こんにちは).
+        if b[i] == b'n' && i + 2 < b.len() && b[i + 1] == b'n' && b"aeiouy".contains(&b[i + 2]) {
+            out.push('ん');
+            i += 1;
+            continue;
+        }
+        for len in (1..=4).rev() {
+            if i + len > b.len() {
+                continue;
+            }
+            let piece = &s[i..i + len];
+            if let Some((_, k)) = ROMAJI.iter().find(|(r, _)| *r == piece) {
+                out.push_str(k);
+                i += len;
+                continue 'outer;
+            }
+        }
+        // A lone n before a consonant or at the end.
+        if b[i] == b'n' && (i + 1 == b.len() || !b"aeiouy".contains(&b[i + 1])) {
+            out.push('ん');
+            i += 1;
+            continue;
+        }
+        return None;
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod romaji_tests {
+    use super::romaji_to_hiragana as r;
+
+    #[test]
+    fn converts() {
+        assert_eq!(r("kakeru").as_deref(), Some("かける"));
+        assert_eq!(r("shinbun").as_deref(), Some("しんぶん"));
+        assert_eq!(r("kitte").as_deref(), Some("きって"));
+        assert_eq!(r("kon'ya").as_deref(), Some("こんや"));
+        assert_eq!(r("konnichiha").as_deref(), Some("こんにちは"));
+        assert_eq!(r("matcha").as_deref(), Some("まっちゃ"));
+        assert_eq!(r("Tokyo").as_deref(), Some("ときょ"));
+        assert_eq!(r("raamen").as_deref(), Some("らあめん"));
+        assert_eq!(r("cake"), None);
+        assert_eq!(r("hang up"), None);
+    }
+}

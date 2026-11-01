@@ -56,6 +56,8 @@ function turns(img: HTMLImageElement): { w: number; h: number } | null {
 }
 
 const KANA_RUBY = /^\s*[(（]([ぁ-ゟァ-ヿー・･]+)[)）]\s*$/;
+// EPWING writes readings bare: 椅子<sup>いす</sup>.
+const BARE_RUBY = /^\s*([ぁ-ゟァ-ヿー]{1,12})\s*$/;
 const KANJI_TAIL = /[㐀-䶿一-鿿豈-﫿々〆ヶ]{1,4}$/;
 
 function isRaised(el: HTMLElement): boolean {
@@ -67,7 +69,7 @@ function isRaised(el: HTMLElement): boolean {
 function realRuby(root: HTMLElement) {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>("sup, span[style*='super']"))) {
     if (!isRaised(el) || el.querySelector("img, ruby")) continue;
-    const m = el.textContent?.match(KANA_RUBY);
+    const m = el.textContent?.match(KANA_RUBY) ?? el.textContent?.match(BARE_RUBY);
     if (!m) continue;
     // The raised reading may be wrapped (span > span); climb to the outermost raised box.
     let box: HTMLElement = el;
@@ -145,4 +147,98 @@ export function adaptHtml(html: string, vertical: boolean): string {
     uprightSymbolRuns(root);
   }
   return root.innerHTML;
+}
+
+// ---- Highlighting -------------------------------------------------------
+
+const foldChar = (c: string) => {
+  const code = c.charCodeAt(0);
+  if (code >= 0x30a1 && code <= 0x30f6) return String.fromCharCode(code - 0x60); // katakana → hiragana
+  if (code >= 0xff01 && code <= 0xff5e) return String.fromCharCode(code - 0xfee0).toLowerCase(); // full-width ASCII
+  return c.toLowerCase();
+};
+const foldText = (s: string) => Array.from(s, foldChar).join("");
+
+/** Remove highlight marks of class `cls` added earlier. */
+export function clearMarks(root: HTMLElement, cls: string) {
+  for (const m of Array.from(root.querySelectorAll(`mark.${cls}`))) {
+    m.replaceWith(...Array.from(m.childNodes));
+  }
+  root.normalize();
+}
+
+/**
+ * Wrap every occurrence of `needle` (kana- and width-insensitive) in `<mark class=cls>`.
+ * A match may run across elements (e.g. 「壁に<b>絵</b>を」); each piece is wrapped.
+ * Ruby readings are skipped. Returns the first mark of each match, in document order.
+ */
+export function markText(root: HTMLElement, needle: string, cls: string, attrs: Record<string, string> = {}): HTMLElement[] {
+  const want = foldText(needle.replace(/\s+/g, ""));
+  if (!want) return [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) =>
+      n.parentElement?.closest(`rt, rp, svg, style, script, mark.${cls}`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const nodes: Text[] = [];
+  const starts: number[] = [];
+  let full = "";
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n as Text;
+    // Whitespace between elements is layout, not text: leave it out of the haystack.
+    const folded = foldText(t.data);
+    if (folded.length !== t.data.length) continue;
+    nodes.push(t);
+    starts.push(full.length);
+    full += folded;
+  }
+  // Matches as [start, end) in the haystack.
+  const found: [number, number][] = [];
+  for (let at = full.indexOf(want); at >= 0; at = full.indexOf(want, at + want.length)) found.push([at, at + want.length]);
+  if (found.length === 0) return [];
+  // Pieces per node, so each node is split from its end backwards.
+  const pieces = new Map<number, { from: number; to: number; match: number }[]>();
+  found.forEach(([a, b], m) => {
+    for (let k = 0; k < nodes.length; k++) {
+      const s = starts[k];
+      const e = s + nodes[k].data.length;
+      if (e <= a || s >= b) continue;
+      const list = pieces.get(k) ?? [];
+      list.push({ from: Math.max(a, s) - s, to: Math.min(b, e) - s, match: m });
+      pieces.set(k, list);
+    }
+  });
+  const firsts: (HTMLElement | null)[] = found.map(() => null);
+  for (const [k, list] of pieces) {
+    for (const p of list.sort((x, y) => y.from - x.from)) {
+      let node = nodes[k];
+      if (p.to < node.data.length) node.splitText(p.to);
+      if (p.from > 0) node = node.splitText(p.from);
+      const mark = document.createElement("mark");
+      mark.className = cls;
+      for (const [k, v] of Object.entries(attrs)) mark.setAttribute(k, v);
+      node.replaceWith(mark);
+      mark.append(node);
+      // Pieces are visited back to front, so the last one seen is the match's first.
+      if (!firsts[p.match] || mark.compareDocumentPosition(firsts[p.match]!) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        firsts[p.match] = mark;
+      }
+    }
+  }
+  return firsts.filter((m): m is HTMLElement => !!m);
+}
+
+/** Split `text` into runs, flagging those that match `needle` (kana- and width-insensitive). */
+export function splitMatches(text: string, needle: string): { text: string; hit: boolean }[] {
+  const want = foldText(needle.replace(/\s+/g, ""));
+  const folded = foldText(text);
+  if (!want || folded.length !== text.length) return [{ text, hit: false }];
+  const out: { text: string; hit: boolean }[] = [];
+  let i = 0;
+  for (let at = folded.indexOf(want); at >= 0; at = folded.indexOf(want, at + want.length)) {
+    if (at > i) out.push({ text: text.slice(i, at), hit: false });
+    out.push({ text: text.slice(at, at + want.length), hit: true });
+    i = at + want.length;
+  }
+  if (i < text.length) out.push({ text: text.slice(i), hit: false });
+  return out;
 }

@@ -61,6 +61,8 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
     let mut stop_code: Option<u16> = None;
     let mut printed = false;
     let mut link_starts: Vec<usize> = vec![];
+    // Size of the monochrome graphic begun by 0x1f44, drawn at its 0x1f64 end code.
+    let mut mono: Option<(u32, u32)> = None;
     let mut i = 0usize;
 
     while i + 1 < data.len() {
@@ -130,6 +132,41 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
                         cur.has_text = true;
                     }
                 }
+                0x44 => {
+                    // Monochrome graphic: [kind:2][height:BCD4][width:BCD4].
+                    if args.len() >= 10 {
+                        let (h, w) = (bcd(&args[2..6]), bcd(&args[6..10]));
+                        mono = (w > 0 && h > 0 && w <= 4096 && h <= 4096).then_some((w, h));
+                    }
+                }
+                0x64 => {
+                    // End of a monochrome graphic: [page:BCD4][offset:BCD2] of the bitmap.
+                    if let (Some((w, h)), true) = (mono.take(), args.len() >= 6) {
+                        let page = bcd(&args[0..4]);
+                        let off = bcd(&args[4..6]);
+                        cur.html.push_str(&format!(
+                            "<img class=\"ep-img ep-mono\" src=\"{}\" alt=\"\" style=\"width:{w}px\">",
+                            media_url(dict_id, &format!("mono/{page}/{off}/{w}/{h}.svg"))
+                        ));
+                        printed = true;
+                        cur.has_text = true;
+                    }
+                }
+                0x4a => {
+                    // WAVE sound: [kind:4][start page:BCD4][start offset:BCD2][end page:BCD4][end offset:BCD2].
+                    if args.len() >= 16 {
+                        let (sp, so) = (bcd(&args[4..8]), bcd(&args[8..10]));
+                        let (ep, eo) = (bcd(&args[10..14]), bcd(&args[14..16]));
+                        cur.html.push_str(&format!(
+                            "<a class=\"ep-sound\" href=\"#\" data-sound=\"{}\" title=\"♪\">",
+                            media_url(dict_id, &format!("wav/{sp}/{so}/{ep}/{eo}.wav"))
+                        ));
+                        cur.html.push_str("<span class=\"ep-sound-icon\">🔊</span>");
+                        printed = true;
+                        cur.has_text = true;
+                    }
+                }
+                0x6a => cur.html.push_str("</a>"),
                 0xe0 => {
                     let arg = be(args);
                     cur.html.push_str(&format!("<span class=\"ep-deco-{arg}\">"));

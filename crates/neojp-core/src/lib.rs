@@ -3,9 +3,11 @@
 pub mod deinflect;
 pub mod epwing;
 pub mod error;
+pub mod fulltext;
 pub mod html;
 pub mod kana;
 pub mod library;
+pub mod userdata;
 pub mod yomitan;
 
 pub use error::{Error, Result};

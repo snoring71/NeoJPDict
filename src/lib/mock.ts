@@ -11,6 +11,7 @@ interface Fixture {
 const sampleDict = (id: number, title: string, groupName: string): DictionaryInfo => ({
   id, kind: "yomitan", title, revision: "1", author: "", description: "", attribution: "", url: "",
   groupName, sortOrder: id, enabled: true, writingMode: "auto", termCount: 2, metaCount: 0, kanjiCount: 0,
+  originalTitle: title, font: "",
 });
 
 const sample: Fixture = {
@@ -45,7 +46,9 @@ function data(): Promise<Fixture> {
 const kata2hira = (s: string) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
 const key = (s: string) => kata2hira(s.normalize("NFKC")).toLowerCase();
 const history: HistoryItem[] = [];
+const markers: { id: number; termId: number; text: string; color: string }[] = [];
 const marks = new Set<number>();
+const notes = new Map<number, { folder: string; note: string }>();
 
 const toHit = (e: Entry): SearchHit => ({ termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, deinflection: null });
 
@@ -68,10 +71,28 @@ export const mockApi = {
     };
     const order = new Map(d.dictionaries.map((x, i) => [x.id, i]));
     return d.entries
-      .filter((e) => (query.dictIds.length === 0 || query.dictIds.includes(e.dictId)) && (test(e.expression) || test(e.reading)))
+      .filter((e) => query.dictIds.length === 0 || query.dictIds.includes(e.dictId))
+      .filter((e) => {
+        const text = () => key(e.html.replace(/<rt>.*?<\/rt>/g, "").replace(/<[^>]+>/g, ""));
+        switch (query.mode) {
+          case "fullText": return text().includes(q);
+          case "example": return (text().match(/「[^」]*」/g) ?? []).some((x) => x.includes(q));
+          case "idiom": return (key(e.expression).includes(q) || key(e.reading).includes(q)) && Math.max(e.expression.length, e.reading.length) >= q.length + 2 && /[をにがのもはとでばぬずへ]/.test(e.expression);
+          case "regex": try { const re = new RegExp(query.text); return re.test(e.expression) || re.test(e.reading); } catch { return false; }
+          default: return test(e.expression) || test(e.reading);
+        }
+      })
       .sort((a, b) => (order.get(a.dictId)! - order.get(b.dictId)!) || a.reading.length - b.reading.length)
       .slice(0, query.limit)
-      .map(toHit);
+      .map((e) => {
+        const hit = toHit(e);
+        if (query.mode === "fullText" || query.mode === "example") {
+          const text = e.html.replace(/<rt>.*?<\/rt>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+          const at = key(text).indexOf(q);
+          if (at >= 0) hit.snippet = (at > 16 ? "…" : "") + text.slice(Math.max(0, at - 16), at + q.length + 40) + "…";
+        }
+        return hit;
+      });
   },
   async get_entry({ termId, record }: any): Promise<EntryView> {
     const d = await data();
@@ -96,9 +117,21 @@ export const mockApi = {
     const e = d.entries.find((x) => x.dictId === dictId)!;
     return mockApi.get_entry({ termId: e.termId, record: false });
   },
-  async browse({ dictId, limit }: any) {
+  async browse({ dictId, limit, offset, after }: any) {
     const d = await data();
-    return d.entries.filter((e) => e.dictId === dictId).slice(0, limit).map(toHit);
+    const start = after ? key(after) : "";
+    return d.entries
+      .filter((e) => e.dictId === dictId)
+      .sort((a, b) => key(a.reading || a.expression).localeCompare(key(b.reading || b.expression)))
+      .filter((e) => key(e.reading || e.expression) >= start)
+      .slice(offset ?? 0, (offset ?? 0) + limit)
+      .map(toHit);
+  },
+  async suggest() {
+    return [];
+  },
+  async special_pages() {
+    return [];
   },
   async history() {
     return history;
@@ -108,11 +141,36 @@ export const mockApi = {
   },
   async bookmarks() {
     const d = await data();
-    return d.entries.filter((e) => marks.has(e.termId)).map((e) => ({ id: e.termId, termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, at: "" }));
+    return d.entries.filter((e) => marks.has(e.termId)).map((e) => ({ id: e.termId, termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, at: new Date().toISOString(), ...(notes.get(e.termId) ?? { folder: "", note: "" }) }));
+  },
+  async markers({ termId }: any) {
+    return markers.filter((m) => m.termId === termId);
+  },
+  async all_markers() {
+    const d = await data();
+    return markers
+      .map((m) => {
+        const e = d.entries.find((x) => x.termId === m.termId);
+        return { ...m, dictId: e?.dictId ?? 0, expression: e?.expression ?? "", reading: e?.reading ?? "" };
+      })
+      .reverse();
+  },
+  async add_marker({ termId, text, color }: any) {
+    markers.push({ id: markers.length + 1, termId, text, color });
+    return markers.length;
+  },
+  async remove_marker({ id }: any) {
+    const i = markers.findIndex((m) => m.id === id);
+    if (i >= 0) markers.splice(i, 1);
   },
   async set_bookmark({ termId, on }: any) {
     on ? marks.add(termId) : marks.delete(termId);
   },
+  async update_bookmark({ termId, folder, note }: any) {
+    marks.add(termId);
+    notes.set(termId, { folder, note });
+  },
+  async export_bookmarks() {},
   async delete_dictionary({ id }: any) {
     const d = await data();
     d.dictionaries = d.dictionaries.filter((x) => x.id !== id);
@@ -121,6 +179,12 @@ export const mockApi = {
   async update_dictionary({ id, enabled, groupName, writingMode }: any) {
     const d = await data();
     Object.assign(d.dictionaries.find((x) => x.id === id)!, { enabled, groupName, writingMode });
+  },
+  async update_dictionary_display({ id, alias, font }: any) {
+    const d = (await data()).dictionaries.find((x) => x.id === id)!;
+    d.originalTitle ??= d.title;
+    d.title = alias.trim() || d.originalTitle;
+    d.font = font;
   },
   async reorder_dictionaries({ ids }: any) {
     const d = await data();

@@ -7,6 +7,7 @@ use neojp_core::{
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
@@ -42,6 +43,66 @@ struct ImportEvent {
     finished: bool,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IndexEvent {
+    dict_id: i64,
+    title: String,
+    done: usize,
+    total: usize,
+    finished: bool,
+}
+
+static INDEXING: AtomicBool = AtomicBool::new(false);
+static INDEX_AGAIN: AtomicBool = AtomicBool::new(false);
+
+/// Build the full-text index for every dictionary that lacks one, on a background thread.
+fn spawn_indexer(app: AppHandle) {
+    if INDEXING.swap(true, Ordering::SeqCst) {
+        INDEX_AGAIN.store(true, Ordering::SeqCst);
+        return;
+    }
+    std::thread::spawn(move || {
+        let db_path = app.state::<AppState>().db_path.clone();
+        loop {
+            INDEX_AGAIN.store(false, Ordering::SeqCst);
+            if let Ok(lib) = Library::open(&db_path) {
+                let store = EpwingStore::default();
+                for id in lib.fulltext_pending().unwrap_or_default() {
+                    let Ok(d) = lib.dictionary(id) else { continue };
+                    let mut last = std::time::Instant::now();
+                    let _ = lib.build_fulltext(&d, Some(&store), |done, total| {
+                        if last.elapsed().as_millis() > 300 {
+                            last = std::time::Instant::now();
+                            let _ = app.emit("index-progress", IndexEvent {
+                                dict_id: d.id, title: d.title.clone(), done, total, finished: false,
+                            });
+                        }
+                        true
+                    });
+                    let _ = app.emit("index-progress", IndexEvent {
+                        dict_id: d.id, title: d.title.clone(), done: 0, total: 0, finished: true,
+                    });
+                }
+            }
+            if !INDEX_AGAIN.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        INDEXING.store(false, Ordering::SeqCst);
+    });
+}
+
+#[tauri::command]
+fn suggest(state: State<AppState>, text: String, dict_ids: Vec<i64>) -> CmdResult<Vec<String>> {
+    state.lib.lock().unwrap().suggest(&text, &dict_ids, 10).map_err(err)
+}
+
+#[tauri::command]
+fn fulltext_ready(state: State<AppState>) -> CmdResult<Vec<i64>> {
+    state.lib.lock().unwrap().fulltext_ready().map_err(err)
+}
+
 #[tauri::command]
 fn list_dictionaries(state: State<AppState>) -> CmdResult<Vec<DictionaryInfo>> {
     state.lib.lock().unwrap().dictionaries().map_err(err)
@@ -49,7 +110,7 @@ fn list_dictionaries(state: State<AppState>) -> CmdResult<Vec<DictionaryInfo>> {
 
 #[tauri::command]
 fn search(state: State<AppState>, query: SearchQuery) -> CmdResult<Vec<SearchHit>> {
-    state.lib.lock().unwrap().search(&query).map_err(err)
+    state.lib.lock().unwrap().search_with(&query, Some(&state.epwing)).map_err(err)
 }
 
 #[tauri::command]
@@ -78,8 +139,25 @@ fn get_entry_at(state: State<AppState>, dict_id: i64, locator: String) -> CmdRes
 }
 
 #[tauri::command]
-fn browse(state: State<AppState>, dict_id: i64, after: Option<String>, limit: usize) -> CmdResult<Vec<SearchHit>> {
-    state.lib.lock().unwrap().browse(dict_id, after.as_deref(), limit).map_err(err)
+fn browse(state: State<AppState>, dict_id: i64, after: Option<String>, offset: Option<usize>, limit: usize) -> CmdResult<Vec<SearchHit>> {
+    state.lib.lock().unwrap().browse(dict_id, after.as_deref(), offset.unwrap_or(0), limit).map_err(err)
+}
+
+#[derive(Serialize)]
+struct SpecialPage {
+    kind: String,
+    locator: String,
+}
+
+/// Menu, copyright and image-menu pages of an EPWING book (empty for other dictionaries).
+#[tauri::command]
+fn special_pages(state: State<AppState>, dict_id: i64) -> CmdResult<Vec<SpecialPage>> {
+    let d = state.lib.lock().unwrap().dictionary(dict_id).map_err(err)?;
+    if d.kind != "epwing" {
+        return Ok(vec![]);
+    }
+    let pages = state.epwing.special_pages(&d).map_err(err)?;
+    Ok(pages.into_iter().map(|(kind, locator)| SpecialPage { kind, locator }).collect())
 }
 
 #[tauri::command]
@@ -98,8 +176,51 @@ fn bookmarks(state: State<AppState>) -> CmdResult<Vec<HistoryItem>> {
 }
 
 #[tauri::command]
+fn markers(state: State<AppState>, term_id: i64) -> CmdResult<Vec<neojp_core::library::Marker>> {
+    state.lib.lock().unwrap().markers(term_id).map_err(err)
+}
+
+#[tauri::command]
+fn all_markers(state: State<AppState>) -> CmdResult<Vec<neojp_core::library::MarkerRow>> {
+    state.lib.lock().unwrap().all_markers().map_err(err)
+}
+
+#[tauri::command]
+fn add_marker(state: State<AppState>, term_id: i64, text: String, color: String) -> CmdResult<i64> {
+    state.lib.lock().unwrap().add_marker(term_id, &text, &color).map_err(err)
+}
+
+#[tauri::command]
+fn remove_marker(state: State<AppState>, id: i64) -> CmdResult<()> {
+    state.lib.lock().unwrap().remove_marker(id).map_err(err)
+}
+
+#[tauri::command]
 fn set_bookmark(state: State<AppState>, term_id: i64, on: bool) -> CmdResult<()> {
     state.lib.lock().unwrap().set_bookmark(term_id, on).map_err(err)
+}
+
+#[tauri::command]
+fn update_bookmark(state: State<AppState>, term_id: i64, folder: String, note: String) -> CmdResult<()> {
+    state.lib.lock().unwrap().update_bookmark(term_id, &folder, &note).map_err(err)
+}
+
+#[tauri::command]
+fn export_bookmarks(state: State<AppState>, path: String) -> CmdResult<()> {
+    let csv = state.lib.lock().unwrap().bookmarks_csv().map_err(err)?;
+    std::fs::write(path, csv).map_err(err)
+}
+
+#[tauri::command]
+fn backup_userdata(state: State<AppState>, path: String) -> CmdResult<()> {
+    let json = state.lib.lock().unwrap().backup_userdata().map_err(err)?;
+    std::fs::write(path, json).map_err(err)
+}
+
+#[tauri::command]
+fn restore_userdata(state: State<AppState>, path: String) -> CmdResult<neojp_core::userdata::RestoreSummary> {
+    let json = std::fs::read_to_string(path).map_err(err)?;
+    state.lib.lock().unwrap().restore_userdata(&json).map_err(err)
 }
 
 #[tauri::command]
@@ -121,6 +242,11 @@ fn update_dictionary(
         .unwrap()
         .update_dictionary_settings(id, enabled, &group_name, &writing_mode)
         .map_err(err)
+}
+
+#[tauri::command]
+fn update_dictionary_display(state: State<AppState>, id: i64, alias: String, font: String) -> CmdResult<()> {
+    state.lib.lock().unwrap().update_dictionary_display(id, &alias, &font).map_err(err)
 }
 
 #[tauri::command]
@@ -161,6 +287,7 @@ fn import_dictionaries(app: AppHandle, state: State<AppState>, paths: Vec<String
                 finished: true,
             });
         }
+        spawn_indexer(app.clone());
     });
     Ok(())
 }
@@ -270,10 +397,50 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Bring the main window to the front (restoring it if minimised).
+fn bring_forward(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Set the system-wide shortcut that brings NeoJPDict forward and looks up the clipboard.
+/// An empty string turns it off.
+#[tauri::command]
+fn set_global_shortcut(app: AppHandle, accelerator: String) -> CmdResult<()> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let gs = app.global_shortcut();
+    gs.unregister_all().map_err(err)?;
+    let accelerator = accelerator.trim();
+    if accelerator.is_empty() {
+        return Ok(());
+    }
+    let shortcut: Shortcut = accelerator.parse().map_err(|e| format!("{e}"))?;
+    gs.register(shortcut).map_err(err)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri_plugin_global_shortcut::ShortcutState;
     tauri::Builder::default()
+        // A second launch focuses the running window instead of opening another.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| bring_forward(app)))
+        // neojpdict://search/<word> links (the installer registers the scheme).
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        bring_forward(app);
+                        let _ = app.emit("global-lookup", ());
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .register_uri_scheme_protocol("njmedia", |ctx, request| {
             media_response(ctx.app_handle(), request.uri().path())
         })
@@ -283,21 +450,41 @@ pub fn run() {
             let db_path = dir.join("library.sqlite3");
             let lib = Library::open(&db_path).map_err(|e| e.to_string())?;
             app.manage(AppState { lib: Mutex::new(lib), db_path, epwing: EpwingStore::default() });
+            spawn_indexer(app.handle().clone());
+            // Also register the link scheme at run time, so a copied or portable app works.
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register_all();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_dictionaries,
+            fulltext_ready,
+            suggest,
             search,
             get_entry,
             get_entry_at,
             browse,
+            special_pages,
             history,
             clear_history,
             bookmarks,
             set_bookmark,
+            markers,
+            add_marker,
+            all_markers,
+            remove_marker,
+            update_bookmark,
+            export_bookmarks,
+            backup_userdata,
+            restore_userdata,
             delete_dictionary,
             update_dictionary,
             reorder_dictionaries,
+            update_dictionary_display,
+            set_global_shortcut,
             import_dictionaries,
         ])
         .run(tauri::generate_context!())
