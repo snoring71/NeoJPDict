@@ -9,6 +9,7 @@ import type {
   SearchHit,
   SearchQuery,
   WritingMode,
+  MarkerRow,
 } from "./types";
 import { mockApi } from "./mock";
 
@@ -33,6 +34,7 @@ export const api = {
   clearHistory: () => call<void>("clear_history"),
   bookmarks: () => call<HistoryItem[]>("bookmarks"),
   markers: (termId: number) => call<{ id: number; text: string; color: string }[]>("markers", { termId }),
+  allMarkers: () => call<MarkerRow[]>("all_markers"),
   addMarker: (termId: number, text: string, color: string) => call<number>("add_marker", { termId, text, color }),
   removeMarker: (id: number) => call<void>("remove_marker", { id }),
   setBookmark: (termId: number, on: boolean) => call<void>("set_bookmark", { termId, on }),

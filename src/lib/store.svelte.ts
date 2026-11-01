@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { HeadwordMode, DictionaryInfo, EntryView, HistoryItem, ImportEvent, MatchMode, SearchHit } from "./types";
+import type { MarkerRow, HeadwordMode, DictionaryInfo, EntryView, HistoryItem, ImportEvent, MatchMode, SearchHit } from "./types";
 
 export type View = "search" | "browse" | "history" | "bookmarks" | "library" | "settings";
 export type Target = "headwords" | "idioms" | "examples" | "fulltext" | "kanji";
@@ -227,8 +227,12 @@ class AppStore {
     this.history = await api.history();
   }
 
+  markerList: MarkerRow[] = $state([]);
+
   async loadBookmarks() {
-    this.bookmarks = await api.bookmarks();
+    const [b, m] = await Promise.all([api.bookmarks(), api.allMarkers().catch(() => [])]);
+    this.bookmarks = b;
+    this.markerList = m;
   }
 
   browseFrom = $state("");

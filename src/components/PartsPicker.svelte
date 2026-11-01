@@ -12,6 +12,8 @@
 
   let data: PartsData | null = $state(null);
   let selected: string[] = $state([]);
+  /** Optional stroke count of the kanji sought. */
+  let strokeFilter: number | null = $state(null);
 
   import("../assets/kanji-parts.json").then((m) => (data = m.default as unknown as PartsData));
 
@@ -63,6 +65,7 @@
     const out: { n: number; kanji: string[] }[] = [];
     for (const k of results.slice(0, 400)) {
       const n = strokeOf.get(k) ?? 0;
+      if (strokeFilter && n !== strokeFilter) continue;
       const last = out.at(-1);
       if (last && last.n === n) last.kanji.push(k);
       else out.push({ n, kanji: [k] });
@@ -80,7 +83,10 @@
     <span class="title">{t("findByParts")}</span>
     {#if selected.length}
       <span class="chosen">{selected.join(" ")}</span>
-      <button class="reset" onclick={() => (selected = [])}>{t("reset")}</button>
+      <label class="strokes" title={t("strokeCount")}>
+        <input type="number" min="1" max="40" placeholder="—" bind:value={strokeFilter} />{t("strokesUnit")}
+      </label>
+      <button class="reset" onclick={() => ((selected = []), (strokeFilter = null))}>{t("reset")}</button>
     {/if}
   </div>
   {#if !data}
@@ -135,6 +141,17 @@
     flex: 1;
     font-family: var(--font-ui-jp);
     font-size: 15px;
+  }
+  .strokes {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--text-2);
+  }
+  .strokes input {
+    width: 44px;
+    padding: 1px 4px;
+    font: inherit;
   }
   .reset {
     border: 0;

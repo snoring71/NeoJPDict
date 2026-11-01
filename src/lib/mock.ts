@@ -146,6 +146,15 @@ export const mockApi = {
   async markers({ termId }: any) {
     return markers.filter((m) => m.termId === termId);
   },
+  async all_markers() {
+    const d = await data();
+    return markers
+      .map((m) => {
+        const e = d.entries.find((x) => x.termId === m.termId);
+        return { ...m, dictId: e?.dictId ?? 0, expression: e?.expression ?? "", reading: e?.reading ?? "" };
+      })
+      .reverse();
+  },
   async add_marker({ termId, text, color }: any) {
     markers.push({ id: markers.length + 1, termId, text, color });
     return markers.length;

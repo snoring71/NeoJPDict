@@ -96,3 +96,13 @@ export interface ImportEvent {
   error: string | null;
   finished: boolean;
 }
+
+export interface MarkerRow {
+  id: number;
+  termId: number;
+  dictId: number;
+  expression: string;
+  reading: string;
+  text: string;
+  color: string;
+}

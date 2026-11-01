@@ -181,6 +181,11 @@ fn markers(state: State<AppState>, term_id: i64) -> CmdResult<Vec<neojp_core::li
 }
 
 #[tauri::command]
+fn all_markers(state: State<AppState>) -> CmdResult<Vec<neojp_core::library::MarkerRow>> {
+    state.lib.lock().unwrap().all_markers().map_err(err)
+}
+
+#[tauri::command]
 fn add_marker(state: State<AppState>, term_id: i64, text: String, color: String) -> CmdResult<i64> {
     state.lib.lock().unwrap().add_marker(term_id, &text, &color).map_err(err)
 }
@@ -469,6 +474,7 @@ pub fn run() {
             set_bookmark,
             markers,
             add_marker,
+            all_markers,
             remove_marker,
             update_bookmark,
             export_bookmarks,

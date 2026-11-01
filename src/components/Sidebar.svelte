@@ -71,6 +71,11 @@
   // Bookmarks: filter, folders, export.
   let bookmarkFilter = $state("");
   let folder: string | null = $state(null);
+  /** The bookmarks pane is showing highlights (マーカー) instead. */
+  let showMarkers = $state(false);
+  const shownMarkers = $derived(
+    app.markerList.filter((m) => !bookmarkFilter.trim() || `${m.text} ${m.expression} ${m.reading}`.includes(bookmarkFilter.trim())),
+  );
   const folders = $derived([...new Set(app.bookmarks.map((b) => b.folder ?? ""))].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).filter((f, _, all) => all.length > 1 || f !== ""));
   const shownBookmarks = $derived(app.bookmarks.filter((b) => (folder === null || (b.folder ?? "") === folder) && matches(b, bookmarkFilter)));
 
@@ -215,15 +220,29 @@
       {#if inTauri}<button class="text-btn" onclick={exportCsv}>{t("exportCsv")}</button>{/if}
     </div>
     <div class="filter"><input bind:value={bookmarkFilter} placeholder={t("filter")} aria-label={t("filter")} /></div>
-    {#if folders.length > 0}
+    {#if folders.length > 0 || app.markerList.length > 0}
       <div class="groups" role="tablist">
-        <button class="chip" class:active={folder === null} onclick={() => (folder = null)}>{t("all")}</button>
+        <button class="chip" class:active={folder === null && !showMarkers} onclick={() => ((folder = null), (showMarkers = false))}>{t("all")}</button>
         {#each folders as f}
-          <button class="chip" class:active={folder === f} onclick={() => (folder = f)}>{f || t("noFolder")}</button>
+          <button class="chip" class:active={folder === f && !showMarkers} onclick={() => ((folder = f), (showMarkers = false))}>{f || t("noFolder")}</button>
         {/each}
+        {#if app.markerList.length > 0}
+          <button class="chip" class:active={showMarkers} onclick={() => (showMarkers = true)}>{t("highlights")}</button>
+        {/if}
       </div>
     {/if}
     <div class="list">
+      {#if showMarkers}
+        {#each shownMarkers as m (m.id)}
+          <button class="mark-row" class:selected={app.selected?.termId === m.termId} onclick={() => app.openTerm(m.termId)}>
+            <DictBadge title={app.dict(m.dictId)?.title ?? "?"} size={18} />
+            <span class="mark-text">
+              <span class="mark-hw"><span class="hl" data-color={m.color}>{m.text}</span></span>
+              <span class="mark-note">{m.reading && m.reading !== m.expression ? `${m.reading}【${m.expression}】` : m.expression}</span>
+            </span>
+          </button>
+        {/each}
+      {:else}
       {#if app.bookmarks.length === 0}<p class="muted pad">{t("noBookmarks")}</p>{/if}
       {#each shownBookmarks as b (b.termId)}
         <button class="mark-row" class:selected={app.selected?.termId === b.termId} onclick={() => app.openTerm(b.termId)}>
@@ -234,6 +253,7 @@
           </span>
         </button>
       {/each}
+      {/if}
     </div>
   {:else if app.view === "browse"}
     {#if app.browseDict == null}
@@ -288,6 +308,22 @@
   .parts-btn.on {
     color: var(--accent-text);
     background: var(--selected);
+  }
+  .hl {
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .hl[data-color="yellow"] {
+    background: rgb(255 224 80 / 0.55);
+  }
+  .hl[data-color="pink"] {
+    background: rgb(255 120 170 / 0.45);
+  }
+  .hl[data-color="blue"] {
+    background: rgb(100 170 255 / 0.45);
+  }
+  .hl[data-color="green"] {
+    background: rgb(110 210 120 / 0.45);
   }
   .search-row {
     display: flex;

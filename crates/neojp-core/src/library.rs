@@ -147,6 +147,18 @@ pub struct Marker {
     pub color: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkerRow {
+    pub id: i64,
+    pub term_id: i64,
+    pub dict_id: i64,
+    pub expression: String,
+    pub reading: String,
+    pub text: String,
+    pub color: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NewDictionary {
     pub kind: String,
@@ -1164,6 +1176,26 @@ impl Library {
     pub fn markers(&self, term_id: i64) -> Result<Vec<Marker>> {
         let mut st = self.conn.prepare("SELECT id, text, color FROM markers WHERE term_id=?1 ORDER BY id")?;
         let rows = st.query_map([term_id], |r| Ok(Marker { id: r.get(0)?, text: r.get(1)?, color: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Every highlight, newest first, with the entry it is in.
+    pub fn all_markers(&self) -> Result<Vec<MarkerRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT m.id, m.term_id, m.dict_id, t.expression, t.reading, m.text, m.color
+             FROM markers m JOIN terms t ON t.id = m.term_id ORDER BY m.id DESC",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(MarkerRow {
+                id: r.get(0)?,
+                term_id: r.get(1)?,
+                dict_id: r.get(2)?,
+                expression: r.get(3)?,
+                reading: r.get(4)?,
+                text: r.get(5)?,
+                color: r.get(6)?,
+            })
+        })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
