@@ -5,6 +5,7 @@
   import { t } from "../lib/i18n";
   import { api, mediaBase, writeClipboard } from "../lib/api";
   import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
+  import { fontFamily } from "../lib/fonts";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
 
@@ -15,7 +16,7 @@
   const entry = $derived(view?.entry);
   /** The dictionary's own font choice, if it has one, else the app setting. */
   const dictFont = $derived((entry && app.dict(entry.dictId)?.font) || "");
-  const fontKind = $derived(dictFont === "mincho" || dictFont === "gothic" ? dictFont : dictFont ? "custom" : settings.font);
+  const entryFont = $derived(fontFamily(dictFont || settings.font, settings.fontWeight));
 
   /** Vertical unless the dictionary, the user or the content says otherwise. */
   const vertical = $derived.by(() => {
@@ -478,9 +479,10 @@
     <div
       class="scroller"
       class:vertical
-      class:gothic={fontKind === "gothic"}
       class:no-ruby={!settings.ruby}
-      style="--entry-size:{settings.fontSize}px{fontKind === 'custom' ? `;font-family:'${dictFont.replace(/['\\;]/g, '')}', var(--font-mincho)` : ''}"
+      style:--entry-size="{settings.fontSize}px"
+      style:font-family={entryFont}
+      style:font-weight={settings.fontWeight}
       bind:this={scroller}
       onwheel={wheel}
       onclick={click}
@@ -700,9 +702,6 @@
     line-height: 1.75;
     color: var(--paper-text, var(--text-1));
   }
-  .scroller.gothic {
-    font-family: var(--font-gothic);
-  }
   .scroller.vertical {
     writing-mode: vertical-rl;
     text-orientation: mixed;
@@ -722,7 +721,7 @@
   .headword {
     margin: 0 0 0.4em;
     font-size: 1.15em;
-    font-weight: 700;
+    font-weight: bolder; /* stays heavier than the body weight */
     line-height: 1.5;
   }
   .headword .expr {
@@ -772,7 +771,7 @@
 
   /* Dictionary content */
   .entry-body :global(.entry-hw) {
-    font-weight: 700;
+    font-weight: bolder;
     font-size: 1.12em;
   }
   /* EPWING text */
@@ -780,7 +779,7 @@
     min-height: 0.5em;
   }
   .entry-body :global(.ep-kw) {
-    font-weight: 700;
+    font-weight: bolder;
   }
   .entry-body :global(.ep-l:first-child .ep-kw) {
     font-size: 1.12em;
@@ -789,7 +788,7 @@
     font-style: italic;
   }
   .entry-body :global(.ep-deco-3) {
-    font-weight: 700;
+    font-weight: bolder;
   }
   .entry-body :global(.ep-gaiji) {
     width: 1em;
