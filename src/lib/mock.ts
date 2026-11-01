@@ -106,9 +106,18 @@ export const mockApi = {
     const e = d.entries.find((x) => x.dictId === dictId)!;
     return mockApi.get_entry({ termId: e.termId, record: false });
   },
-  async browse({ dictId, limit }: any) {
+  async browse({ dictId, limit, offset, after }: any) {
     const d = await data();
-    return d.entries.filter((e) => e.dictId === dictId).slice(0, limit).map(toHit);
+    const start = after ? key(after) : "";
+    return d.entries
+      .filter((e) => e.dictId === dictId)
+      .sort((a, b) => key(a.reading || a.expression).localeCompare(key(b.reading || b.expression)))
+      .filter((e) => key(e.reading || e.expression) >= start)
+      .slice(offset ?? 0, (offset ?? 0) + limit)
+      .map(toHit);
+  },
+  async special_pages() {
+    return [];
   },
   async history() {
     return history;

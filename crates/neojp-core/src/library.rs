@@ -896,13 +896,15 @@ impl Library {
     }
 
     /// A page of headwords in reading order, for browse mode.
-    pub fn browse(&self, dict_id: i64, after: Option<&str>, limit: usize) -> Result<Vec<SearchHit>> {
+    /// Headwords of one dictionary in reading order, starting at `after` (a reading prefix),
+    /// skipping `offset` rows for paging.
+    pub fn browse(&self, dict_id: i64, after: Option<&str>, offset: usize, limit: usize) -> Result<Vec<SearchHit>> {
         let mut st = self.conn.prepare_cached(
             "SELECT id, dict_id, expression, reading FROM terms
-             WHERE dict_id=?1 AND sort_key >= ?2 ORDER BY sort_key, id LIMIT ?3",
+             WHERE dict_id=?1 AND sort_key >= ?2 ORDER BY sort_key, id LIMIT ?3 OFFSET ?4",
         )?;
         let start = after.map(kana::search_key).unwrap_or_default();
-        let rows = st.query_map(params![dict_id, start, limit as i64], |r| {
+        let rows = st.query_map(params![dict_id, start, limit as i64, offset as i64], |r| {
             Ok(SearchHit {
                 term_id: r.get(0)?,
                 dict_id: r.get(1)?,

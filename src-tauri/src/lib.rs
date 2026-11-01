@@ -134,8 +134,25 @@ fn get_entry_at(state: State<AppState>, dict_id: i64, locator: String) -> CmdRes
 }
 
 #[tauri::command]
-fn browse(state: State<AppState>, dict_id: i64, after: Option<String>, limit: usize) -> CmdResult<Vec<SearchHit>> {
-    state.lib.lock().unwrap().browse(dict_id, after.as_deref(), limit).map_err(err)
+fn browse(state: State<AppState>, dict_id: i64, after: Option<String>, offset: Option<usize>, limit: usize) -> CmdResult<Vec<SearchHit>> {
+    state.lib.lock().unwrap().browse(dict_id, after.as_deref(), offset.unwrap_or(0), limit).map_err(err)
+}
+
+#[derive(Serialize)]
+struct SpecialPage {
+    kind: String,
+    locator: String,
+}
+
+/// Menu, copyright and image-menu pages of an EPWING book (empty for other dictionaries).
+#[tauri::command]
+fn special_pages(state: State<AppState>, dict_id: i64) -> CmdResult<Vec<SpecialPage>> {
+    let d = state.lib.lock().unwrap().dictionary(dict_id).map_err(err)?;
+    if d.kind != "epwing" {
+        return Ok(vec![]);
+    }
+    let pages = state.epwing.special_pages(&d).map_err(err)?;
+    Ok(pages.into_iter().map(|(kind, locator)| SpecialPage { kind, locator }).collect())
 }
 
 #[tauri::command]
@@ -361,6 +378,7 @@ pub fn run() {
             get_entry,
             get_entry_at,
             browse,
+            special_pages,
             history,
             clear_history,
             bookmarks,

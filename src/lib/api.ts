@@ -25,8 +25,9 @@ export const api = {
   search: (query: SearchQuery) => call<SearchHit[]>("search", { query }),
   getEntry: (termId: number, record = true) => call<EntryView>("get_entry", { termId, record }),
   getEntryAt: (dictId: number, locator: string) => call<EntryView>("get_entry_at", { dictId, locator }),
-  browse: (dictId: number, after: string | null, limit = 200) =>
-    call<SearchHit[]>("browse", { dictId, after, limit }),
+  browse: (dictId: number, after: string | null, limit = 200, offset = 0) =>
+    call<SearchHit[]>("browse", { dictId, after, limit, offset }),
+  specialPages: (dictId: number) => call<{ kind: string; locator: string }[]>("special_pages", { dictId }),
   history: (limit = 500) => call<HistoryItem[]>("history", { limit }),
   clearHistory: () => call<void>("clear_history"),
   bookmarks: () => call<HistoryItem[]>("bookmarks"),

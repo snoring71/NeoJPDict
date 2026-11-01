@@ -64,6 +64,8 @@
   const folders = $derived([...new Set(app.bookmarks.map((b) => b.folder ?? ""))].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).filter((f, _, all) => all.length > 1 || f !== ""));
   const shownBookmarks = $derived(app.bookmarks.filter((b) => (folder === null || (b.folder ?? "") === folder) && matches(b, bookmarkFilter)));
 
+  const pageLabel = (k: string) => (k === "menu" ? "bookMenu" : k === "copyright" ? "copyright" : "imageMenu") as "bookMenu" | "copyright" | "imageMenu";
+
   async function exportCsv() {
     const path = await pickCsvSavePath();
     if (path) await api.exportBookmarks(path);
@@ -221,7 +223,22 @@
         <button class="icon" aria-label="back" onclick={() => (app.browseDict = null)}><Icon name="left" /></button>
         <h2>{app.dict(app.browseDict)?.title}</h2>
       </div>
-      <div class="list">
+      <div class="filter">
+        <input
+          value={app.browseFrom}
+          oninput={(e) => app.loadBrowse(app.browseDict!, (e.currentTarget as HTMLInputElement).value)}
+          placeholder={t("jumpTo")}
+          aria-label={t("jumpTo")} />
+      </div>
+      <div class="list" onscroll={(e) => { const el = e.currentTarget as HTMLElement; if (el.scrollTop + el.clientHeight > el.scrollHeight - 400) app.moreBrowse(); }}>
+        {#if app.browsePages.length && !app.browseFrom}
+          {#each app.browsePages as pg}
+            <button class="mark-row page-row" onclick={() => app.openAt(app.browseDict!, pg.locator)}>
+              <Icon name="book" size={16} /><span class="mark-hw">{t(pageLabel(pg.kind))}</span>
+            </button>
+          {/each}
+          <div class="day">{t("headwords")}</div>
+        {/if}
         <ResultList hits={app.browseHits} grouped={false} onpick={(h) => app.open(h)} />
       </div>
     {/if}

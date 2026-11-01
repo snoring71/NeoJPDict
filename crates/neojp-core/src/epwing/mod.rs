@@ -155,6 +155,19 @@ impl Subbook {
         Ok(Subbook { info: info.clone(), text, indexes, gaiji, starts: OnceLock::new() })
     }
 
+    /// Fixed pages a book may carry: its menu (0x01), copyright notice (0x02) and
+    /// image menu (0x16). Returned as (kind, position of the text).
+    pub fn special_pages(&self) -> Vec<(&'static str, Position)> {
+        [(0x01u8, "menu"), (0x02, "copyright"), (0x16, "imageMenu")]
+            .iter()
+            .filter_map(|&(id, kind)| self.index(id).map(|ix| (kind, Position { page: ix.start, offset: 0 })))
+            .collect()
+    }
+
+    pub fn index_ids(&self) -> Vec<(u8, u32, u32)> {
+        self.indexes.iter().map(|i| (i.id, i.start, i.count)).collect()
+    }
+
     fn index(&self, id: u8) -> Option<IndexInfo> {
         self.indexes.iter().copied().find(|i| i.id == id)
     }
@@ -466,6 +479,13 @@ impl EpwingStore {
         let sb = Arc::new(Subbook::open(&root, &info)?);
         self.open.lock().unwrap().insert(dict.id, sb.clone());
         Ok(sb)
+    }
+}
+
+impl EpwingStore {
+    /// The book's menu, copyright and image-menu pages as (kind, locator).
+    pub fn special_pages(&self, dict: &DictionaryInfo) -> Result<Vec<(String, String)>> {
+        Ok(self.subbook(dict)?.special_pages().into_iter().map(|(k, p)| (k.to_string(), p.locator())).collect())
     }
 }
 

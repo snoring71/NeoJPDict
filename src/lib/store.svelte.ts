@@ -134,9 +134,32 @@ class AppStore {
     this.bookmarks = await api.bookmarks();
   }
 
-  async loadBrowse(dictId: number) {
+  browseFrom = $state("");
+  browsePages: { kind: string; locator: string }[] = $state([]);
+  private browseDone = false;
+  private browseLoading = false;
+
+  async loadBrowse(dictId: number, from = "") {
     this.browseDict = dictId;
-    this.browseHits = await api.browse(dictId, null, 500);
+    this.browseFrom = from;
+    this.browseDone = false;
+    const hits = await api.browse(dictId, from || null, 300, 0);
+    this.browseHits = hits;
+    this.browseDone = hits.length < 300;
+    if (!from) this.browsePages = await api.specialPages(dictId).catch(() => []);
+  }
+
+  /** Next page of the browse list (called when the list is scrolled near its end). */
+  async moreBrowse() {
+    if (this.browseDict == null || this.browseDone || this.browseLoading) return;
+    this.browseLoading = true;
+    try {
+      const more = await api.browse(this.browseDict, this.browseFrom || null, 300, this.browseHits.length);
+      this.browseHits = [...this.browseHits, ...more];
+      this.browseDone = more.length < 300;
+    } finally {
+      this.browseLoading = false;
+    }
   }
 }
 
