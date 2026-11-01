@@ -44,3 +44,9 @@ The library lives in `%APPDATA%\io.github.snoring71.neojpdict\library.sqlite3`.
 ## Licence
 
 GPL-3.0-or-later. Dictionaries are not included; the app only reads dictionaries you already have.
+
+`src/assets/kanji-parts.json` (the data behind “Find kanji by parts”) is derived from
+[KanjiVG](https://kanjivg.tagaini.net/) © Ulrich Apel (CC BY-SA 3.0) and
+[KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) © the Electronic
+Dictionary Research and Development Group (CC BY-SA 4.0), by way of the `kanji` npm
+package. That file is distributed under CC BY-SA 4.0.

@@ -7,9 +7,19 @@
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
   import ResultList from "./ResultList.svelte";
+  import PartsPicker from "./PartsPicker.svelte";
 
   let input: HTMLInputElement | undefined = $state();
   let recentOpen = $state(false);
+  let partsOpen = $state(false);
+
+  /** A kanji picked by its parts: search it as a kanji, or add it to the search text. */
+  function pickKanji(k: string) {
+    app.query = app.target === "kanji" ? k : app.query + k;
+    app.rememberQuery();
+    app.runSearch();
+    input?.focus();
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const modes: HeadwordMode[] = ["prefix", "exact", "suffix", "contains", "regex"];
@@ -125,6 +135,7 @@
           <button class="clear" aria-label="clear" onclick={clear}><Icon name="close" size={16} /></button>
         {/if}
       </label>
+      <button class="icon parts-btn" class:on={partsOpen} title={t("findByParts")} aria-label={t("findByParts")} aria-pressed={partsOpen} onclick={() => (partsOpen = !partsOpen)}>部</button>
       <div class="recent-wrap">
         <button class="icon" title={t("history")} onclick={() => (recentOpen = !recentOpen)}><Icon name="clock" /></button>
         {#if recentOpen}
@@ -149,6 +160,9 @@
         {/each}
       </div>
     </div>
+    {#if partsOpen}
+      <PartsPicker onpick={pickKanji} />
+    {/if}
     {#if app.indexing && (app.target === "fulltext" || app.target === "examples")}
       <div class="note">{t("fulltextIndexing", { title: app.indexing.title, pct: app.indexing.pct })}</div>
     {/if}
@@ -266,6 +280,14 @@
     min-height: 0;
     background: var(--sidebar);
     border-right: 1px solid var(--divider);
+  }
+  .parts-btn {
+    font-family: var(--font-ui-jp);
+    font-size: 15px;
+  }
+  .parts-btn.on {
+    color: var(--accent-text);
+    background: var(--selected);
   }
   .search-row {
     display: flex;
