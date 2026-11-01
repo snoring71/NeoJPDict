@@ -479,6 +479,7 @@
       class="scroller"
       class:vertical
       class:gothic={fontKind === "gothic"}
+      class:no-ruby={!settings.ruby}
       style="--entry-size:{settings.fontSize}px{fontKind === 'custom' ? `;font-family:'${dictFont.replace(/['\\;]/g, '')}', var(--font-mincho)` : ''}"
       bind:this={scroller}
       onwheel={wheel}
@@ -647,6 +648,10 @@
   }
   .menu button:hover {
     background: var(--hover);
+  }
+  .no-ruby :global(rt),
+  .no-ruby :global(rp) {
+    display: none;
   }
   .more-menu {
     left: auto;

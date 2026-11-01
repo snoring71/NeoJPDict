@@ -15,6 +15,8 @@ export interface Settings {
   onTop: boolean;
   /** System-wide shortcut that brings the window forward and looks up the clipboard ('' = off). */
   globalShortcut: string;
+  /** Show ruby readings (furigana) in entries. */
+  ruby: boolean;
 }
 
 const defaults: Settings = {
@@ -27,6 +29,7 @@ const defaults: Settings = {
   clipboardLookup: false,
   onTop: false,
   globalShortcut: "Ctrl+Alt+J",
+  ruby: true,
 };
 
 function load(): Settings {

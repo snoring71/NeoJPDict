@@ -114,6 +114,9 @@
       <option value="black">{t("paperBlack")}</option>
     </select>
 
+    <label for="s-ruby">{t("ruby")}</label>
+    <label class="check"><input id="s-ruby" type="checkbox" bind:checked={settings.ruby} onchange={saveSettings} />{t("rubyHint")}</label>
+
     <label for="s-clip">{t("clipboardLookup")}</label>
     <label class="check"><input id="s-clip" type="checkbox" bind:checked={settings.clipboardLookup} onchange={saveSettings} />{t("clipboardLookupHint")}</label>
 
