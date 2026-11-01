@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { app } from "../lib/store.svelte";
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
-  import { api, mediaBase } from "../lib/api";
+  import { api, mediaBase, writeClipboard } from "../lib/api";
   import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
@@ -159,7 +160,13 @@
   });
 
   function wheel(e: WheelEvent) {
-    if (!vertical || !scroller || e.ctrlKey) return;
+    if (e.ctrlKey) {
+      // Ctrl+wheel resizes the entry text, as in a browser.
+      e.preventDefault();
+      if (Math.abs(e.deltaY) > 0) size(e.deltaY < 0 ? 1 : -1);
+      return;
+    }
+    if (!vertical || !scroller) return;
     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
       e.preventDefault();
       scroller.scrollLeft -= e.deltaY;
@@ -174,6 +181,49 @@
     if (q) app.searchFor(q);
     const ep = a.getAttribute("data-ep");
     if (ep && entry) app.openAt(entry.dictId, ep);
+  }
+
+  // Copy / print
+  let moreOpen = $state(false);
+  let copied = $state("");
+
+  /** The entry's visible text, without ruby readings. */
+  function entryText(): string {
+    const article = scroller?.querySelector("article");
+    if (!article) return "";
+    const clone = article.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("rt, rp, style, .freq").forEach((n) => n.remove());
+    // innerText needs layout to place line breaks, so measure it off-screen.
+    clone.style.cssText = "position:fixed;left:-99999px;top:0;writing-mode:horizontal-tb;white-space:normal";
+    document.body.append(clone);
+    const text = clone.innerText.replace(/\n{3,}/g, "\n\n").trim();
+    clone.remove();
+    return text;
+  }
+
+  async function copy(kind: "headword" | "text") {
+    moreOpen = false;
+    if (!entry) return;
+    const text = kind === "headword" ? entry.expression : `${entryText()}\n\n— ${entry.dictTitle}`;
+    await writeClipboard(text);
+    copied = kind;
+    setTimeout(() => (copied = ""), 1500);
+  }
+
+  /** Print the entry. Paged vertical text prints poorly, so it prints horizontally. */
+  async function printEntry() {
+    moreOpen = false;
+    const saved = app.directionOverride;
+    if (vertical) {
+      app.directionOverride = "horizontal";
+      await tick();
+    }
+    const restore = () => {
+      app.directionOverride = saved;
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.print();
   }
 
   // なぞってジャンプ: select text in the entry to look it up.
@@ -253,7 +303,7 @@
 <section class="reader" aria-label={entry?.dictTitle}>
   {#if view && entry}
     <header class="entry-bar">
-      <div class="nav">
+      <div class="history-nav">
         <button class="icon" title={t("back")} aria-label={t("back")} disabled={app.backStack.length === 0} onclick={() => app.goBack()}><Icon name="left" /></button>
         <button class="icon" title={t("forward")} aria-label={t("forward")} disabled={app.forwardStack.length === 0} onclick={() => app.goForward()}><Icon name="right" /></button>
       </div>
@@ -294,6 +344,18 @@
         <button class="icon" title={t("toggleDirection")} aria-pressed={vertical} onclick={toggleDirection}>
           <span class="dir">{vertical ? "縦" : "横"}</span>
         </button>
+        <div class="mark-wrap">
+          <button class="icon" title={copied ? t("copied") : t("more")} aria-label={t("more")} onclick={() => (moreOpen = !moreOpen)}>
+            <Icon name={copied ? "check" : "more"} />
+          </button>
+          {#if moreOpen}
+            <div class="menu more-menu" role="menu">
+              <button role="menuitem" onclick={() => copy("headword")}>{t("copyHeadword")}</button>
+              <button role="menuitem" onclick={() => copy("text")}>{t("copyEntry")}</button>
+              <button role="menuitem" onclick={printEntry}>{t("print")}</button>
+            </div>
+          {/if}
+        </div>
         <div class="mark-wrap">
           <button class="icon" class:on={entry.bookmarked} title={t("bookmark")} onclick={bookmarkClick}>
             <Icon name={entry.bookmarked ? "bookmarkFilled" : "bookmark"} />
@@ -408,13 +470,13 @@
     border-bottom: 1px solid var(--divider);
     flex: none;
   }
-  .nav {
+  .history-nav {
     display: flex;
     flex: none;
     gap: 0;
     margin-inline-end: 2px;
   }
-  .nav .icon:disabled {
+  .history-nav .icon:disabled {
     opacity: 0.35;
     cursor: default;
   }
@@ -471,6 +533,28 @@
   }
   .menu button:hover {
     background: var(--hover);
+  }
+  .more-menu {
+    left: auto;
+    right: 0;
+    transform: none;
+    min-width: 200px;
+    top: calc(100% + 6px);
+    z-index: 20;
+  }
+  @media print {
+    .entry-bar,
+    footer.nav,
+    .pick,
+    .find {
+      display: none !important;
+    }
+    .scroller {
+      overflow: visible !important;
+      height: auto !important;
+      padding: 0 !important;
+      color: #000 !important;
+    }
   }
   .actions {
     position: absolute;

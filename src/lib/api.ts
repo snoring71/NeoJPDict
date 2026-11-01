@@ -126,6 +126,15 @@ export async function readClipboard(): Promise<string | null> {
   }
 }
 
+export async function writeClipboard(text: string) {
+  if (!inTauri) {
+    await navigator.clipboard?.writeText(text).catch(() => {});
+    return;
+  }
+  const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+  await writeText(text).catch(() => {});
+}
+
 export async function setAlwaysOnTop(on: boolean) {
   if (!inTauri) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");

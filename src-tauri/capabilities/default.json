@@ -12,6 +12,7 @@
     "dialog:allow-message",
     "dialog:allow-ask",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "core:window:allow-set-always-on-top"
   ]
 }
