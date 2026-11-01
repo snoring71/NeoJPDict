@@ -18,9 +18,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use zio::{Zio, find_ci};
 
-/// At most this many linked phrases are drawn inline under one entry.
-const MAX_SUBENTRIES: usize = 40;
-
 #[derive(Debug, Clone)]
 pub struct SubbookInfo {
     pub title: String,
@@ -221,7 +218,7 @@ impl Subbook {
         starts.get(i).copied()
     }
 
-    fn render(&self, pos: Position, dict_id: i64) -> Result<text::Rendered> {
+    pub fn entry_html(&self, pos: Position, dict_id: i64) -> Result<String> {
         let start = pos.byte_offset();
         // An entry ends at the next indexed entry at the latest; the text codes
         // usually mark the end earlier, but not for every book.
@@ -232,49 +229,10 @@ impl Subbook {
             let r = text::render_html(&data, dict_id, &self.gaiji);
             let ends_inside = data.windows(2).skip(4).any(|w| w == [0x1f, 0x03]);
             if ends_inside || len >= limit || r.html.len() < len {
-                return Ok(r);
+                return Ok(r.html);
             }
             len = (len * 4).min(limit);
         }
-    }
-
-    /// The entries a list of links points to, each drawn in full under the
-    /// entry that lists them (as a printed dictionary shows its 句 under a word).
-    fn subentries_html(&self, refs: &[String], dict_id: i64) -> String {
-        let mut out = String::new();
-        for r in refs.iter().take(MAX_SUBENTRIES) {
-            let Some(p) = Position::parse(r) else { continue };
-            let Ok(sub) = self.render(p, dict_id) else { continue };
-            out.push_str(&format!("<div class=\"ep-sub\" data-ep-at=\"{r}\">"));
-            out.push_str(&sub.inner_html(sub.headline_repeated()));
-            out.push_str("</div>");
-        }
-        out
-    }
-
-    pub fn entry_html(&self, pos: Position, dict_id: i64) -> Result<String> {
-        let r = self.render(pos, dict_id)?;
-        let skip_head = r.headline_repeated();
-        // A page that only lists links to its phrases: show the phrases themselves.
-        if let Some(refs) = r.link_list() {
-            let subs = self.subentries_html(&refs, dict_id);
-            if !subs.is_empty() {
-                return Ok(r.to_html(skip_head, true, &subs));
-            }
-        }
-        // A word whose phrases are listed on the page right after it: add them below.
-        if let Some(next) = self.next_start(pos.byte_offset()) {
-            let pos_next = Position { page: (next / zio::PAGE) as u32 + 1, offset: (next % zio::PAGE) as u16 };
-            if let Ok(n) = self.render(pos_next, dict_id)
-                && let Some(refs) = n.link_list()
-                && !n.headword().is_empty()
-                && n.headword() == r.headword()
-            {
-                let subs = self.subentries_html(&refs, dict_id);
-                return Ok(r.to_html(skip_head, false, &subs));
-            }
-        }
-        Ok(r.to_html(skip_head, false, ""))
     }
 
     /// A monochrome graphic (1 bit per pixel, rows top to bottom) as SVG.

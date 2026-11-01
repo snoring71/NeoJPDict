@@ -15,6 +15,11 @@ pub fn escape(s: &str) -> String {
     out
 }
 
+/// Undo [`escape`].
+pub fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+}
+
 /// Escape text and turn newlines into `<br>`.
 pub fn escape_text(s: &str) -> String {
     escape(s).replace('\n', "<br>")

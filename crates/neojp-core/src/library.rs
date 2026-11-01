@@ -7,6 +7,33 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// At most this many phrases are drawn under one word.
+const MAX_PHRASES: usize = 40;
+
+/// When a rendered glossary is nothing but links to other headwords (and list
+/// markup around them), the linked headwords.
+fn phrase_links(body: &str) -> Option<Vec<String>> {
+    let mut links = vec![];
+    let mut rest = body;
+    let mut text = String::new();
+    while let Some(p) = rest.find('<') {
+        text.push_str(&rest[..p]);
+        let after = &rest[p..];
+        let end = after.find('>').map_or(after.len(), |e| e + 1);
+        let tag = &after[..end];
+        if tag.starts_with("<a ") {
+            let close = after.find("</a>")?;
+            let q = tag.split("data-query=\"").nth(1)?.split('"').next()?;
+            links.push(crate::html::unescape(q));
+            rest = &after[close + 4..];
+        } else {
+            rest = &after[end..];
+        }
+    }
+    text.push_str(rest);
+    (!links.is_empty() && text.trim().is_empty()).then_some(links)
+}
+
 const SCHEMA_VERSION: i64 = 1;
 
 const SCHEMA: &str = r#"
@@ -58,6 +85,7 @@ CREATE INDEX IF NOT EXISTS terms_reading_rev ON terms(reading_rev);
 CREATE INDEX IF NOT EXISTS terms_browse  ON terms(dict_id, sort_key, id);
 CREATE INDEX IF NOT EXISTS terms_locator ON terms(dict_id, locator) WHERE locator != '';
 CREATE INDEX IF NOT EXISTS terms_rules ON terms(dict_id) WHERE rules != '';
+CREATE INDEX IF NOT EXISTS terms_sequence ON terms(dict_id, sequence) WHERE sequence IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS term_meta (
     dict_id    INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE,
@@ -757,7 +785,10 @@ impl Library {
         let order: std::collections::HashMap<i64, usize> =
             enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
         hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
-        Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect())
+        let mut hits: Vec<SearchHit> = hits.into_iter().map(|(h, _)| h).collect();
+        self.drop_phrase_lists(&mut hits)?;
+        hits.truncate(q.limit);
+        Ok(hits)
     }
 
     /// "Did you mean": headwords one character away from `text` (one substituted,
@@ -927,6 +958,84 @@ impl Library {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    // ---------------------------------------------------------------- phrases
+
+    /// Some Yomitan dictionaries (三省堂国語辞典) store a word's phrases (句) as
+    /// their own terms, plus an extra term under the word, with the same sequence
+    /// number, whose glossary is only links to them. Draw those phrases in full
+    /// under the word, and under the link list itself.
+    fn with_phrases(&self, term_id: i64, dict_id: i64, body: String) -> Result<String> {
+        let sequence: Option<i64> =
+            self.conn.query_row("SELECT sequence FROM terms WHERE id=?1", [term_id], |r| r.get(0))?;
+        let Some(seq) = sequence.filter(|s| *s != 0) else { return Ok(body) };
+        let mut st = self.conn.prepare_cached(
+            "SELECT body FROM terms WHERE dict_id=?1 AND sequence=?2 AND id != ?3 ORDER BY id LIMIT 50",
+        )?;
+        let siblings = st
+            .query_map(params![dict_id, seq, term_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if siblings.is_empty() {
+            return Ok(body);
+        }
+        let own_links = phrase_links(&body);
+        let list = own_links.is_some();
+        let links = own_links.unwrap_or_else(|| siblings.iter().filter_map(|b| phrase_links(b)).flatten().collect());
+        if links.is_empty() {
+            return Ok(body);
+        }
+        let mut subs = String::new();
+        let mut st = self.conn.prepare_cached(
+            "SELECT body FROM terms WHERE dict_id=?1 AND expr_key=?2 AND expression=?3 AND body != ''
+             ORDER BY score DESC, id LIMIT 5",
+        )?;
+        for q in links.iter().take(MAX_PHRASES) {
+            let bodies = st
+                .query_map(params![dict_id, kana::search_key(q), q], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if let Some(b) = bodies.into_iter().find(|b| phrase_links(b).is_none()) {
+                subs.push_str("<div class=\"sub-entry\">");
+                subs.push_str(&b);
+                subs.push_str("</div>");
+            }
+        }
+        if subs.is_empty() {
+            return Ok(body);
+        }
+        // A bare link list is replaced by the phrases it points to.
+        Ok(if list { subs } else { body + &subs })
+    }
+
+    /// Remove link-list terms (see [`Self::with_phrases`]) from results that
+    /// also hold the word they belong to, since the word's entry now shows them.
+    fn drop_phrase_lists(&self, hits: &mut Vec<SearchHit>) -> Result<()> {
+        if hits.is_empty() {
+            return Ok(());
+        }
+        let ids = hits.iter().map(|h| h.term_id.to_string()).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, dict_id, sequence, instr(body, 'data-query=') > 0 AND length(body) < 8000, body
+             FROM terms WHERE id IN ({ids}) AND sequence IS NOT NULL AND sequence != 0"
+        );
+        let mut st = self.conn.prepare(&sql)?;
+        let rows = st
+            .query_map([], |r| {
+                let maybe: bool = r.get(3)?;
+                let body: Option<String> = if maybe { r.get(4)? } else { None };
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, body))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let lists: std::collections::HashSet<i64> = rows
+            .iter()
+            .filter(|(id, dict, seq, body)| {
+                body.as_deref().is_some_and(|b| phrase_links(b).is_some())
+                    && rows.iter().any(|(o, d, s, ob)| o != id && d == dict && s == seq && ob.as_deref().is_none_or(|b| phrase_links(b).is_none()))
+            })
+            .map(|r| r.0)
+            .collect();
+        hits.retain(|h| !lists.contains(&h.term_id));
+        Ok(())
+    }
+
     // ---------------------------------------------------------------- entries
 
     pub fn entry(&self, term_id: i64, external: Option<&dyn ExternalBodies>) -> Result<Entry> {
@@ -970,7 +1079,7 @@ impl Library {
                 None => String::new(),
             }
         } else {
-            body
+            self.with_phrases(term_id, dict_id, body)?
         };
 
         let mut tags = Vec::new();

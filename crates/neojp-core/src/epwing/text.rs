@@ -42,133 +42,8 @@ fn narrow_char(c: char) -> char {
     }
 }
 
-/// One rendered line of an entry.
-pub struct RenderedLine {
-    indent: u32,
-    html: String,
-    /// All the line's text, links included.
-    text: String,
-    /// Text outside any reference link.
-    outside: String,
-    /// Targets (`page:offset`) of the reference links on the line.
-    refs: Vec<String>,
-}
-
 pub struct Rendered {
     pub html: String,
-    lines: Vec<RenderedLine>,
-}
-
-/// Circled sense numbers that start a sense line (①–⑳, ❶–❿, ➀–➓).
-fn is_sense_mark(c: char) -> bool {
-    matches!(c, '\u{2460}'..='\u{2473}' | '\u{2776}'..='\u{277F}' | '\u{2780}'..='\u{2793}')
-}
-
-fn is_kana(c: char) -> bool {
-    matches!(c, '\u{3041}'..='\u{309F}' | '\u{30A0}'..='\u{30FF}')
-}
-
-/// Kana a headword starts with, skipping separators a book puts inside readings
-/// (spaces, ・, ‐) and stopping at the first other character.
-fn leading_reading(text: &str) -> String {
-    text.trim_start()
-        .chars()
-        .take_while(|&c| is_kana(c) || c.is_whitespace() || matches!(c, '‐' | '-' | '‑' | '–'))
-        .filter(|&c| is_kana(c) && c != '・')
-        .collect()
-}
-
-impl Rendered {
-    /// Plain text of the entry's first line.
-    pub fn headline(&self) -> &str {
-        self.lines.first().map(|l| l.text.trim()).unwrap_or("")
-    }
-
-    /// The headline up to the end of its bracketed spelling, without marks
-    /// that follow it (such as a 句 badge on a phrase list).
-    pub fn headword(&self) -> &str {
-        let h = self.headline();
-        match h.find(['】', '〕', '］']) {
-            Some(i) => &h[..i + h[i..].chars().next().map_or(0, char::len_utf8)],
-            None => h,
-        }
-    }
-
-    /// The first line is a bare keyword line ("ほんき【本気】") and the next line
-    /// is the book's own, fuller headline for the same word ("ほんき〔本気〕（名・ダナ）").
-    pub fn headline_repeated(&self) -> bool {
-        let [first, second, ..] = self.lines.as_slice() else { return false };
-        let head = first.text.trim();
-        let Some(reading) = head.split(['【', '〔', '［', '[']).next() else { return false };
-        if reading == head && !head.chars().all(|c| is_kana(c) || matches!(c, '・' | '‐' | '-' | ' ')) {
-            return false;
-        }
-        let r1 = leading_reading(reading);
-        !r1.is_empty() && leading_reading(&second.text) == r1
-    }
-
-    /// When the entry is only its headline followed by numbered links to other
-    /// entries (a book's list of phrases or idioms under a word), the link targets.
-    pub fn link_list(&self) -> Option<Vec<String>> {
-        let rest: Vec<&RenderedLine> = self.lines.iter().skip(1).filter(|l| !l.text.trim().is_empty()).collect();
-        if rest.is_empty() {
-            return None;
-        }
-        let numbering = |s: &str| {
-            s.chars().all(|c| {
-                c.is_whitespace() || c.is_ascii_digit() || matches!(c, '０'..='９' | '.' | '．' | '、' | '(' | ')' | '（' | '）' | '・') || is_sense_mark(c)
-            })
-        };
-        let mut out = vec![];
-        for l in rest {
-            if l.refs.is_empty() || !numbering(&l.outside) {
-                return None;
-            }
-            out.extend(l.refs.iter().cloned());
-        }
-        Some(out)
-    }
-
-    /// The entry as HTML, optionally without its first line and/or without its
-    /// link lines, with `extra` appended inside the entry.
-    pub fn to_html(&self, skip_headline: bool, skip_links: bool, extra: &str) -> String {
-        let mut html = String::from("<div class=\"ep\">");
-        for (n, l) in self.lines.iter().enumerate() {
-            if (n == 0 && skip_headline) || (n > 0 && skip_links && !l.refs.is_empty()) {
-                continue;
-            }
-            push_line(&mut html, l);
-        }
-        html.push_str(extra);
-        html.push_str("</div>");
-        html
-    }
-
-    /// The entry's lines as HTML without the outer `ep` wrapper.
-    pub fn inner_html(&self, skip_headline: bool) -> String {
-        let mut html = String::new();
-        for (n, l) in self.lines.iter().enumerate() {
-            if n == 0 && skip_headline {
-                continue;
-            }
-            push_line(&mut html, l);
-        }
-        html
-    }
-}
-
-fn push_line(html: &mut String, l: &RenderedLine) {
-    // Indent 1 is the left margin; deeper levels step in by 1em.
-    let ind = l.indent.saturating_sub(1);
-    // A sense line ("① …") wraps under its text, not under the number.
-    let class = if l.text.trim_start().starts_with(is_sense_mark) { "ep-l ep-hang" } else { "ep-l" };
-    if ind > 0 {
-        html.push_str(&format!("<div class=\"{class}\" style=\"margin-inline-start:{ind}em\">"));
-    } else {
-        html.push_str(&format!("<div class=\"{class}\">"));
-    }
-    html.push_str(&close_open_tags(&l.html));
-    html.push_str("</div>");
 }
 
 /// Render an entry starting at `data[0]` as HTML. `data` is a window of the
@@ -178,13 +53,9 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
         indent: u32,
         html: String,
         has_text: bool,
-        text: String,
-        outside: String,
-        refs: Vec<String>,
     }
-    let new_line = |indent| Line { indent, html: String::new(), has_text: false, text: String::new(), outside: String::new(), refs: vec![] };
     let mut lines: Vec<Line> = vec![];
-    let mut cur = new_line(0);
+    let mut cur = Line { indent: 0, html: String::new(), has_text: false };
     let mut indent = 0u32;
     let mut narrow = false;
     let mut stop_code: Option<u16> = None;
@@ -224,7 +95,7 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
                 0x0a => {
                     // A link that spans lines loses its anchor rather than pointing into the wrong line.
                     link_starts.clear();
-                    let next = new_line(indent);
+                    let next = Line { indent, html: String::new(), has_text: false };
                     lines.push(std::mem::replace(&mut cur, next));
                 }
                 0x41 => {
@@ -245,7 +116,6 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
                         if at <= cur.html.len() {
                             cur.html.insert_str(at, &format!("<a class=\"ep-ref\" href=\"#\" data-ep=\"{page}:{off}\">"));
                             cur.html.push_str("</a>");
-                            cur.refs.push(format!("{page}:{off}"));
                         }
                     }
                 }
@@ -311,10 +181,6 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
             if let Some(c) = jis_char(b0, b1) {
                 let c = if narrow { narrow_char(c) } else { c };
                 cur.html.push_str(&escape(&c.to_string()));
-                cur.text.push(c);
-                if link_starts.is_empty() {
-                    cur.outside.push(c);
-                }
                 printed = true;
                 cur.has_text = true;
             }
@@ -334,13 +200,20 @@ pub fn render_html(data: &[u8], dict_id: i64, gaiji: &Gaiji) -> Rendered {
     while lines.first().is_some_and(|l| l.html.trim().is_empty()) {
         lines.remove(0);
     }
-    let lines = lines
-        .into_iter()
-        .map(|l| RenderedLine { indent: l.indent, html: l.html, text: l.text, outside: l.outside, refs: l.refs })
-        .collect();
-    let mut r = Rendered { html: String::new(), lines };
-    r.html = r.to_html(false, false, "");
-    r
+    let mut html = String::from("<div class=\"ep\">");
+    for l in lines {
+        // Indent 1 is the left margin; deeper levels step in by 1em.
+        let ind = l.indent.saturating_sub(1);
+        if ind > 0 {
+            html.push_str(&format!("<div class=\"ep-l\" style=\"margin-inline-start:{ind}em\">"));
+        } else {
+            html.push_str("<div class=\"ep-l\">");
+        }
+        html.push_str(&close_open_tags(&l.html));
+        html.push_str("</div>");
+    }
+    html.push_str("</div>");
+    Rendered { html }
 }
 
 /// Lines can split a styled span (decoration that crosses a newline). Balance tags per line.
@@ -456,78 +329,5 @@ mod tests {
         let r = render_html(&d, 3, &g());
         assert!(r.html.contains("<a class=\"ep-ref\" href=\"#\" data-ep=\"21:6516\">参照</a>"), "{}", r.html);
         assert!(r.html.contains("nj-media:3/cg/5207/32"), "{}", r.html);
-    }
-
-    /// JIS bytes of `s` (each character as two 7-bit bytes).
-    fn jis(s: &str) -> Vec<u8> {
-        let (b, _, bad) = encoding_rs::EUC_JP.encode(s);
-        assert!(!bad);
-        b.iter().map(|x| x & 0x7f).collect()
-    }
-
-    fn entry(lines: &[&[u8]]) -> Vec<u8> {
-        let mut d = vec![0x1f, 0x02];
-        for (n, l) in lines.iter().enumerate() {
-            if n > 0 {
-                d.extend_from_slice(&[0x1f, 0x0a]);
-            }
-            d.extend_from_slice(l);
-        }
-        d.extend_from_slice(&[0x1f, 0x03]);
-        d
-    }
-
-    fn kw(s: &str) -> Vec<u8> {
-        let mut d = vec![0x1f, 0x41, 0x01, 0x00];
-        d.extend(jis(s));
-        d.extend_from_slice(&[0x1f, 0x61]);
-        d
-    }
-
-    fn link(s: &str, page: u8, off: u8) -> Vec<u8> {
-        let mut d = vec![0x1f, 0x42];
-        d.extend(jis(s));
-        d.extend_from_slice(&[0x1f, 0x62, 0, 0, 0, page, 0, off]);
-        d
-    }
-
-    #[test]
-    fn repeated_headline_is_detected() {
-        let d = entry(&[&kw("ほんき【本気】"), &jis("ほ　ん　き〔本気〕（名・ダナ）"), &jis("①まじめで熱心な気持ち。")]);
-        let r = render_html(&d, 1, &g());
-        assert!(r.headline_repeated());
-        assert_eq!(r.headword(), "ほんき【本気】");
-        let html = r.to_html(true, false, "");
-        assert!(!html.contains("【本気】"), "{html}");
-        assert!(html.contains("<div class=\"ep-l ep-hang\">①"), "{html}");
-
-        let d = entry(&[&kw("まじ【本気】"), &jis("まじ［マジ・本気］")]);
-        assert!(render_html(&d, 1, &g()).headline_repeated());
-
-        // A plain headline followed by the definition stays.
-        let d = entry(&[&kw("ほんき【本気】"), &jis("まじめな気持ち。")]);
-        assert!(!render_html(&d, 1, &g()).headline_repeated());
-    }
-
-    #[test]
-    fn phrase_link_lists() {
-        let mut l1 = jis("１．");
-        l1.extend(link("本気にする", 2, 0x10));
-        let mut l2 = jis("２．");
-        l2.extend(link("本気になる", 2, 0x40));
-        let d = entry(&[&kw("ほんき【本気】"), &l1, &l2]);
-        let r = render_html(&d, 1, &g());
-        assert_eq!(r.link_list(), Some(vec!["2:16".to_string(), "2:64".to_string()]));
-        let html = r.to_html(false, true, "<div class=\"ep-sub\"></div>");
-        assert!(!html.contains("ep-ref"), "{html}");
-
-        // A definition that mentions a link is not a list.
-        let mut l = jis("→");
-        l.extend(link("本気", 2, 0x10));
-        l.extend(jis("を見よ。"));
-        let d = entry(&[&kw("ほんき【本気】"), &l]);
-        assert_eq!(render_html(&d, 1, &g()).link_list(), None);
-        let d = entry(&[&kw("ほんき【本気】"), &jis("まじめな気持ち。")]);
-        assert_eq!(render_html(&d, 1, &g()).link_list(), None);
     }
 }

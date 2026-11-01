@@ -37,17 +37,37 @@
     return latin / letters.length < 0.35;
   }
 
-  /** Split off the first line when the entry already starts with its own headword (common in 国語辞典), written with 【】, 〔〕 or ［］. */
+  /** Kana of a reading, without separators (・‐ spaces) that books put inside headwords. */
+  const kanaOnly = (s: string) => s.replace(/[^\u3041-\u309f\u30a0-\u30ff]|・/g, "");
+
+  /** Whether the entry's own first text is its headword (its reading, or the written form). */
+  function startsWithHeadword(html: string, reading: string, expression: string): boolean {
+    const text = html
+      .slice(0, 4000)
+      .replace(/<[^>]*>/g, "")
+      .replace(/&[a-z]+;|&#\d+;/g, "")
+      .trimStart();
+    if (expression && text.startsWith(expression)) return true;
+    const r = kanaOnly(reading);
+    if (!r) return false;
+    // Compare the leading run of kana (and separators) with the reading.
+    const lead = text.match(/^[\u3041-\u309f\u30a0-\u30ff・‐\-\s]+/);
+    return !!lead && kanaOnly(lead[0]) === r;
+  }
+
+  /** Split off the first line when the entry already starts with its own headword (common in 国語辞典). */
   const body = $derived.by(() => {
     if (!entry) return { head: "", html: "", own: false };
     const html = adaptHtml(entry.html.replaceAll("nj-media:", mediaBase()), vertical);
     // EPWING text starts with its own headline, so no separate heading is drawn.
     if (html.startsWith('<div class="ep">')) return { head: "", html, own: true };
-    const m = html.match(/^(<div class="gloss(?: sc)?">)([^<]{1,80}?[【〔［][^<]{1,60}?[】〕］][^<]{0,40}?)(<br>|<\/div>)/);
+    const m = html.match(/^(<div class="gloss(?: sc)?">)([^<]{1,80}?【[^<]{1,60}?】[^<]{0,40}?)(<br>|<\/div>)/);
     if (m) {
       const rest = m[3] === "<br>" ? m[1] + html.slice(m[0].length) : html.slice(m[1].length + m[2].length);
       return { head: m[2], html: rest, own: false };
     }
+    // Structured headlines (三省堂国語辞典: ほん|き［本気］｟名・ダナ｠ with accent marks) are kept as the book draws them.
+    if (startsWithHeadword(html, entry.reading || entry.expression, entry.expression)) return { head: "", html, own: true };
     return { head: "", html, own: false };
   });
 
@@ -782,26 +802,22 @@
   .entry-body :global(.ep-kw) {
     font-weight: bolder;
   }
-  .entry-body :global(.ep > .ep-l:first-child .ep-kw) {
+  .entry-body :global(.ep-l:first-child .ep-kw) {
     font-size: 1.12em;
   }
-  /* A sense line ("① …") wraps under its text, not under the number. */
-  .entry-body :global(.ep-l.ep-hang) {
-    padding-inline-start: 1em;
-    text-indent: -1em;
-  }
   /* Phrases (句) drawn under the word they belong to. */
-  .entry-body :global(.ep-sub) {
-    margin-block-start: 0.6em;
+  .entry-body :global(.sub-entry) {
+    margin-block-start: 0.8em;
+    position: relative;
+    padding-inline-start: 0.9em;
   }
-  .entry-body :global(.ep-sub > .ep-l:first-child) {
-    font-weight: bolder;
-  }
-  .entry-body :global(.ep-sub > .ep-l:first-child::before) {
+  .entry-body :global(.sub-entry)::before {
     content: "●";
+    position: absolute;
+    inset-inline-start: 0;
+    inset-block-start: 0.35em;
+    font-size: 0.55em;
     color: var(--accent-text);
-    font-size: 0.6em;
-    margin-inline-end: 0.4em;
   }
   .entry-body :global(.ep-deco-1) {
     font-style: italic;
