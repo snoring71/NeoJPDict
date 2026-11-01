@@ -159,6 +159,17 @@ fn set_bookmark(state: State<AppState>, term_id: i64, on: bool) -> CmdResult<()>
 }
 
 #[tauri::command]
+fn update_bookmark(state: State<AppState>, term_id: i64, folder: String, note: String) -> CmdResult<()> {
+    state.lib.lock().unwrap().update_bookmark(term_id, &folder, &note).map_err(err)
+}
+
+#[tauri::command]
+fn export_bookmarks(state: State<AppState>, path: String) -> CmdResult<()> {
+    let csv = state.lib.lock().unwrap().bookmarks_csv().map_err(err)?;
+    std::fs::write(path, csv).map_err(err)
+}
+
+#[tauri::command]
 fn delete_dictionary(state: State<AppState>, id: i64) -> CmdResult<()> {
     state.lib.lock().unwrap().delete_dictionary(id).map_err(err)
 }
@@ -354,6 +365,8 @@ pub fn run() {
             clear_history,
             bookmarks,
             set_bookmark,
+            update_bookmark,
+            export_bookmarks,
             delete_dictionary,
             update_dictionary,
             reorder_dictionaries,

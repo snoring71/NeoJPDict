@@ -1,7 +1,8 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
   import { t } from "../lib/i18n";
-  import { api } from "../lib/api";
+  import { api, inTauri, pickCsvSavePath } from "../lib/api";
+  import { lang } from "../lib/i18n";
   import type { HeadwordMode } from "../lib/types";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
@@ -28,6 +29,44 @@
   function setTarget(t: (typeof targets)[number]) {
     app.target = t;
     app.runSearch();
+  }
+
+  // History: filter and day groups.
+  let historyFilter = $state("");
+  const kanaFold = (s: string) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).toLowerCase();
+  const matches = (h: { expression: string; reading: string; note?: string }, q: string) =>
+    !q || [h.expression, h.reading, h.note ?? ""].some((x) => kanaFold(x).includes(kanaFold(q.trim())));
+
+  function dayLabel(at: string): string {
+    // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS".
+    const d = new Date(at.includes("T") ? at : at.replace(" ", "T") + "Z");
+    if (isNaN(d.getTime())) return "";
+    const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((start(new Date()) - start(d)) / 86400000);
+    if (diff === 0) return t("today");
+    if (diff === 1) return t("yesterday");
+    return d.toLocaleDateString(lang() === "ja" ? "ja-JP" : "en-US", { year: "numeric", month: "short", day: "numeric", weekday: "short" });
+  }
+
+  const historyDays = $derived.by(() => {
+    const out: { label: string; items: typeof app.history }[] = [];
+    for (const h of app.history.filter((h) => matches(h, historyFilter))) {
+      const label = dayLabel(h.at);
+      if (out.at(-1)?.label === label) out.at(-1)!.items.push(h);
+      else out.push({ label, items: [h] });
+    }
+    return out;
+  });
+
+  // Bookmarks: filter, folders, export.
+  let bookmarkFilter = $state("");
+  let folder: string | null = $state(null);
+  const folders = $derived([...new Set(app.bookmarks.map((b) => b.folder ?? ""))].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).filter((f, _, all) => all.length > 1 || f !== ""));
+  const shownBookmarks = $derived(app.bookmarks.filter((b) => (folder === null || (b.folder ?? "") === folder) && matches(b, bookmarkFilter)));
+
+  async function exportCsv() {
+    const path = await pickCsvSavePath();
+    if (path) await api.exportBookmarks(path);
   }
 
   function setGroup(g: string) {
@@ -132,15 +171,39 @@
       <h2>{t("history")}</h2>
       <button class="text-btn" onclick={async () => { await api.clearHistory(); app.loadHistory(); }}>{t("clearHistory")}</button>
     </div>
+    <div class="filter"><input bind:value={historyFilter} placeholder={t("filter")} aria-label={t("filter")} /></div>
     <div class="list">
       {#if app.history.length === 0}<p class="muted pad">{t("noHistory")}</p>{/if}
-      <ResultList hits={app.history.map((h) => ({ ...h, deinflection: null }))} grouped={false} onpick={(h) => app.openTerm(h.termId)} />
+      {#each historyDays as day (day.label)}
+        <div class="day">{day.label}</div>
+        <ResultList hits={day.items.map((h) => ({ ...h, deinflection: null }))} grouped={false} onpick={(h) => app.openTerm(h.termId)} />
+      {/each}
     </div>
   {:else if app.view === "bookmarks"}
-    <div class="pane-head"><h2>{t("bookmarks")}</h2></div>
+    <div class="pane-head">
+      <h2>{t("bookmarks")}</h2>
+      {#if inTauri}<button class="text-btn" onclick={exportCsv}>{t("exportCsv")}</button>{/if}
+    </div>
+    <div class="filter"><input bind:value={bookmarkFilter} placeholder={t("filter")} aria-label={t("filter")} /></div>
+    {#if folders.length > 0}
+      <div class="groups" role="tablist">
+        <button class="chip" class:active={folder === null} onclick={() => (folder = null)}>{t("all")}</button>
+        {#each folders as f}
+          <button class="chip" class:active={folder === f} onclick={() => (folder = f)}>{f || t("noFolder")}</button>
+        {/each}
+      </div>
+    {/if}
     <div class="list">
       {#if app.bookmarks.length === 0}<p class="muted pad">{t("noBookmarks")}</p>{/if}
-      <ResultList hits={app.bookmarks.map((h) => ({ ...h, deinflection: null }))} grouped={false} onpick={(h) => app.openTerm(h.termId)} />
+      {#each shownBookmarks as b (b.termId)}
+        <button class="mark-row" class:selected={app.selected?.termId === b.termId} onclick={() => app.openTerm(b.termId)}>
+          <DictBadge title={app.dict(b.dictId)?.title ?? "?"} size={18} />
+          <span class="mark-text">
+            <span class="mark-hw">{b.reading && b.reading !== b.expression ? `${b.reading}【${b.expression}】` : b.expression}</span>
+            {#if b.note}<span class="mark-note">{b.note}</span>{/if}
+          </span>
+        </button>
+      {/each}
     </div>
   {:else if app.view === "browse"}
     {#if app.browseDict == null}
@@ -277,6 +340,65 @@
     padding: 0 12px 8px;
     font-size: 12px;
     color: var(--text-2);
+  }
+  .filter {
+    padding: 0 12px 8px;
+  }
+  .filter input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--field-border);
+    background: var(--field) !important;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 8px;
+  }
+  .day {
+    padding: 10px 16px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .mark-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: calc(100% - 16px);
+    margin: 0 8px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+  .mark-row:hover {
+    background: var(--hover);
+  }
+  .mark-row.selected {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  .mark-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .mark-hw {
+    font-family: var(--font-ui-jp);
+    font-size: 14.5px;
+  }
+  .mark-note {
+    font-size: 12px;
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .segmented button {
     flex: 1;

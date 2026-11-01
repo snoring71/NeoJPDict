@@ -76,6 +76,8 @@ export interface HistoryItem {
   expression: string;
   reading: string;
   at: string;
+  folder?: string;
+  note?: string;
 }
 
 export interface ImportEvent {

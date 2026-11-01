@@ -46,6 +46,7 @@ const kata2hira = (s: string) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharC
 const key = (s: string) => kata2hira(s.normalize("NFKC")).toLowerCase();
 const history: HistoryItem[] = [];
 const marks = new Set<number>();
+const notes = new Map<number, { folder: string; note: string }>();
 
 const toHit = (e: Entry): SearchHit => ({ termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, deinflection: null });
 
@@ -117,11 +118,16 @@ export const mockApi = {
   },
   async bookmarks() {
     const d = await data();
-    return d.entries.filter((e) => marks.has(e.termId)).map((e) => ({ id: e.termId, termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, at: "" }));
+    return d.entries.filter((e) => marks.has(e.termId)).map((e) => ({ id: e.termId, termId: e.termId, dictId: e.dictId, expression: e.expression, reading: e.reading, at: new Date().toISOString(), ...(notes.get(e.termId) ?? { folder: "", note: "" }) }));
   },
   async set_bookmark({ termId, on }: any) {
     on ? marks.add(termId) : marks.delete(termId);
   },
+  async update_bookmark({ termId, folder, note }: any) {
+    marks.add(termId);
+    notes.set(termId, { folder, note });
+  },
+  async export_bookmarks() {},
   async delete_dictionary({ id }: any) {
     const d = await data();
     d.dictionaries = d.dictionaries.filter((x) => x.id !== id);

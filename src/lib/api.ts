@@ -31,6 +31,8 @@ export const api = {
   clearHistory: () => call<void>("clear_history"),
   bookmarks: () => call<HistoryItem[]>("bookmarks"),
   setBookmark: (termId: number, on: boolean) => call<void>("set_bookmark", { termId, on }),
+  updateBookmark: (termId: number, folder: string, note: string) => call<void>("update_bookmark", { termId, folder, note }),
+  exportBookmarks: (path: string) => call<void>("export_bookmarks", { path }),
   deleteDictionary: (id: number) => call<void>("delete_dictionary", { id }),
   updateDictionary: (id: number, enabled: boolean, groupName: string, writingMode: WritingMode) =>
     call<void>("update_dictionary", { id, enabled, groupName, writingMode }),
@@ -90,4 +92,10 @@ export async function pickEpwingFolder(): Promise<string[]> {
 export function mediaBase(): string {
   if (!inTauri) return "/dev-fixture/media/";
   return navigator.userAgent.includes("Windows") ? "http://njmedia.localhost/" : "njmedia://localhost/";
+}
+
+export async function pickCsvSavePath(): Promise<string | null> {
+  if (!inTauri) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  return save({ defaultPath: "bookmarks.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
 }

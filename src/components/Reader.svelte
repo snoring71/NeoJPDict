@@ -2,7 +2,7 @@
   import { app } from "../lib/store.svelte";
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
-  import { mediaBase } from "../lib/api";
+  import { api, mediaBase } from "../lib/api";
   import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
@@ -49,6 +49,36 @@
   const siblings = $derived(
     entry ? app.hits.filter((h) => h.expression === entry.expression && h.termId !== entry.termId) : [],
   );
+
+  // Bookmark folder and note.
+  let markOpen = $state(false);
+  let markFolder = $state("");
+  let markNote = $state("");
+
+  async function bookmarkClick() {
+    if (!entry) return;
+    if (!entry.bookmarked) {
+      await app.toggleBookmark();
+      return;
+    }
+    if (app.bookmarks.length === 0) await app.loadBookmarks();
+    const b = app.bookmarks.find((x) => x.termId === entry!.termId);
+    markFolder = b?.folder ?? "";
+    markNote = b?.note ?? "";
+    markOpen = !markOpen;
+  }
+
+  async function saveMark() {
+    if (!entry) return;
+    await api.updateBookmark(entry.termId, markFolder, markNote);
+    await app.loadBookmarks();
+    markOpen = false;
+  }
+
+  async function removeMark() {
+    markOpen = false;
+    await app.toggleBookmark();
+  }
 
   // Find in entry (Ctrl+F) and the highlight of the searched text.
   let findOpen = $state(false);
@@ -232,9 +262,24 @@
         <button class="icon" title={t("toggleDirection")} aria-pressed={vertical} onclick={toggleDirection}>
           <span class="dir">{vertical ? "縦" : "横"}</span>
         </button>
-        <button class="icon" class:on={entry.bookmarked} title={t("bookmark")} onclick={() => app.toggleBookmark()}>
-          <Icon name={entry.bookmarked ? "bookmarkFilled" : "bookmark"} />
-        </button>
+        <div class="mark-wrap">
+          <button class="icon" class:on={entry.bookmarked} title={t("bookmark")} onclick={bookmarkClick}>
+            <Icon name={entry.bookmarked ? "bookmarkFilled" : "bookmark"} />
+          </button>
+          {#if markOpen}
+            <div class="mark-pop" role="dialog" aria-label={t("bookmark")}>
+              <label>{t("folder")}<input list="nj-folders" bind:value={markFolder} /></label>
+              <datalist id="nj-folders">
+                {#each [...new Set(app.bookmarks.map((b) => b.folder).filter(Boolean))] as f}<option value={f}></option>{/each}
+              </datalist>
+              <label>{t("note")}<textarea rows="3" bind:value={markNote}></textarea></label>
+              <div class="mark-actions">
+                <button class="text-btn danger" onclick={removeMark}>{t("removeBookmark")}</button>
+                <button class="text-btn" onclick={saveMark}>{t("done")}</button>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
     </header>
 
@@ -551,12 +596,64 @@
     writing-mode: horizontal-tb;
   }
   .entry :global(mark.nj-hit) {
-    background: var(--highlight, rgba(255, 214, 10, 0.45));
+    background: rgb(255 214 10 / 0.45);
     color: inherit;
     border-radius: 2px;
   }
   .entry :global(mark.nj-hit.current) {
-    background: var(--highlight-current, rgba(255, 149, 0, 0.75));
+    background: rgb(255 149 0 / 0.75);
+  }
+  .mark-wrap {
+    position: relative;
+  }
+  .mark-pop {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    width: 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--divider-strong);
+    background: var(--flyout);
+    box-shadow: var(--shadow);
+  }
+  .mark-pop label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .mark-pop input,
+  .mark-pop textarea {
+    border: 1px solid var(--divider-strong);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 6px;
+    resize: vertical;
+  }
+  .mark-actions {
+    display: flex;
+    justify-content: space-between;
+  }
+  .text-btn {
+    border: 0;
+    background: transparent;
+    color: var(--accent-text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .text-btn.danger {
+    color: var(--label-red, #c33);
   }
   .find {
     display: flex;
@@ -565,7 +662,7 @@
     border: 1px solid var(--divider-strong);
     border-radius: 6px;
     padding: 0 2px 0 8px;
-    background: var(--surface, transparent);
+    background: var(--field);
   }
   .find input {
     width: 88px;

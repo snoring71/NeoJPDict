@@ -246,6 +246,11 @@ pub struct HistoryItem {
     pub expression: String,
     pub reading: String,
     pub at: String,
+    /// Bookmarks only: user folder and note.
+    #[serde(default)]
+    pub folder: String,
+    #[serde(default)]
+    pub note: String,
 }
 
 pub struct Library {
@@ -932,7 +937,7 @@ impl Library {
 
     pub fn history(&self, limit: usize) -> Result<Vec<HistoryItem>> {
         self.list_items(
-            "SELECT id, term_id, dict_id, expression, reading, viewed_at FROM history ORDER BY id DESC LIMIT ?1",
+            "SELECT id, term_id, dict_id, expression, reading, viewed_at, '', '' FROM history ORDER BY id DESC LIMIT ?1",
             limit,
         )
     }
@@ -955,9 +960,33 @@ impl Library {
         Ok(())
     }
 
+    /// Set a bookmark's folder and note (bookmarking the entry if needed).
+    pub fn update_bookmark(&self, term_id: i64, folder: &str, note: &str) -> Result<()> {
+        self.set_bookmark(term_id, true)?;
+        self.conn.execute(
+            "UPDATE bookmarks SET folder=?2, note=?3 WHERE term_id=?1",
+            params![term_id, folder.trim(), note],
+        )?;
+        Ok(())
+    }
+
+    /// Bookmarks as CSV (headword, reading, dictionary, folder, note, date), with a BOM so Excel reads UTF-8.
+    pub fn bookmarks_csv(&self) -> Result<String> {
+        let titles: std::collections::HashMap<i64, String> =
+            self.dictionaries()?.into_iter().map(|d| (d.id, d.title)).collect();
+        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        let mut out = String::from("\u{FEFF}headword,reading,dictionary,folder,note,added\r\n");
+        for b in self.bookmarks()? {
+            let title = titles.get(&b.dict_id).map(String::as_str).unwrap_or("");
+            out.push_str(&[q(&b.expression), q(&b.reading), q(title), q(&b.folder), q(&b.note), q(&b.at)].join(","));
+            out.push_str("\r\n");
+        }
+        Ok(out)
+    }
+
     pub fn bookmarks(&self) -> Result<Vec<HistoryItem>> {
         self.list_items(
-            "SELECT id, term_id, dict_id, expression, reading, created_at FROM bookmarks ORDER BY id DESC LIMIT ?1",
+            "SELECT id, term_id, dict_id, expression, reading, created_at, folder, note FROM bookmarks ORDER BY id DESC LIMIT ?1",
             100_000,
         )
     }
@@ -972,6 +1001,8 @@ impl Library {
                 expression: r.get(3)?,
                 reading: r.get(4)?,
                 at: r.get(5)?,
+                folder: r.get(6)?,
+                note: r.get(7)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
