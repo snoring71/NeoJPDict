@@ -556,7 +556,31 @@ impl Library {
     }
 
     /// Like `search`, with a body loader so example search can read EPWING entries.
+    /// Search, also trying romaji typed without an IME as kana (kakeru → かける).
+    /// Hits for the text as typed (e.g. English headwords) come first.
     pub fn search_with(&self, q: &SearchQuery, external: Option<&dyn ExternalBodies>) -> Result<Vec<SearchHit>> {
+        let mut hits = self.search_one(q, external)?;
+        let romaji_modes = matches!(
+            q.mode,
+            MatchMode::Exact | MatchMode::Prefix | MatchMode::Suffix | MatchMode::Contains | MatchMode::Idiom
+        );
+        // An English word that is itself a headword ("time") is not romaji.
+        let typed = q.text.trim().to_lowercase();
+        let is_headword = hits.iter().any(|h| h.expression.to_lowercase() == typed);
+        if romaji_modes && !is_headword {
+            if let Some(kana) = kana::romaji_to_hiragana(&q.text) {
+                let kq = SearchQuery { text: kana, ..q.clone() };
+                let seen: std::collections::HashSet<i64> = hits.iter().map(|h| h.term_id).collect();
+                hits.extend(self.search_one(&kq, external)?.into_iter().filter(|h| !seen.contains(&h.term_id)));
+                if q.limit > 0 {
+                    hits.truncate(q.limit);
+                }
+            }
+        }
+        Ok(hits)
+    }
+
+    fn search_one(&self, q: &SearchQuery, external: Option<&dyn ExternalBodies>) -> Result<Vec<SearchHit>> {
         let key = kana::search_key(q.text.trim());
         if key.is_empty() {
             return Ok(vec![]);
