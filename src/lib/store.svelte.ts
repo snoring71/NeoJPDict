@@ -122,6 +122,31 @@ class AppStore {
     }
     if (!this.restoring) this.autoChain = auto;
     this.here = next;
+    try {
+      localStorage.setItem("neojpdict.last", JSON.stringify({ ...next, matchMode: this.matchMode }));
+    } catch {}
+  }
+
+  /** Reopen the entry and search that were on screen when the app last closed. */
+  async restoreLast() {
+    let last: (Place & { matchMode?: HeadwordMode }) | null = null;
+    try {
+      last = JSON.parse(localStorage.getItem("neojpdict.last") ?? "null");
+    } catch {}
+    if (!last || this.current) return;
+    this.restoring = true;
+    try {
+      if (last.matchMode) this.matchMode = last.matchMode;
+      this.target = last.target ?? "headwords";
+      this.query = last.query ?? "";
+      if (last.termId) await this.openTerm(last.termId, false);
+      else if (last.locator) await this.openAt(last.dictId, last.locator);
+      if (this.query) await this.runSearch();
+    } catch {
+      // The entry is gone (dictionary removed or re-imported): start fresh.
+    } finally {
+      this.restoring = false;
+    }
   }
 
   private placeOf(v: EntryView, locator = ""): Place {

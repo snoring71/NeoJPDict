@@ -68,7 +68,7 @@
   onMount(() => {
     window.addEventListener("focus", windowFocused);
     readClipboard().then((t) => (lastClip = t?.trim() ?? ""));
-    app.refreshDictionaries();
+    app.refreshDictionaries().then(() => app.restoreLast());
     const unsubs: (() => void)[] = [];
     onImportProgress((e) => {
       const prev = app.imports[e.path];
