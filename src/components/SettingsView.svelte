@@ -158,6 +158,7 @@
     <dt>Ctrl+T</dt><dd>{t("toggleDirection")}</dd>
     <dt>Ctrl+= / Ctrl+-</dt><dd>{t("fontSize")}</dd>
     <dt>Ctrl+1…5</dt><dd>{t("keyTargets")}</dd>
+    <dt>neojpdict://search/…</dt><dd>{t("linkHint")}</dd>
     <dt>Ctrl+Shift+M</dt><dd>{t("compact")}</dd>
   </dl>
   <p class="about">{t("about")}</p>

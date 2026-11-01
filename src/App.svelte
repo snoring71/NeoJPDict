@@ -3,7 +3,7 @@
   import { app, type View } from "./lib/store.svelte";
   import { settings } from "./lib/settings.svelte";
   import { t, lang, type MessageKey } from "./lib/i18n";
-  import { api, onFileDrop, onGlobalLookup, onImportProgress, onIndexProgress, readClipboard, setAlwaysOnTop, setGlobalShortcut } from "./lib/api";
+  import { api, onDeepLink, onFileDrop, onGlobalLookup, onImportProgress, onIndexProgress, readClipboard, setAlwaysOnTop, setGlobalShortcut } from "./lib/api";
   import Icon from "./components/Icon.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Reader from "./components/Reader.svelte";
@@ -92,6 +92,10 @@
       clipboardLookup(true);
     }).then((u) => unsubs.push(u));
     setGlobalShortcut(settings.globalShortcut).catch(() => {});
+    onDeepLink((q) => {
+      compact = false;
+      app.searchFor(q);
+    }).then((u) => unsubs.push(u));
     onFileDrop(startImport, (on) => (app.dragging = on)).then((u) => unsubs.push(u));
 
     const keys = (e: KeyboardEvent) => {

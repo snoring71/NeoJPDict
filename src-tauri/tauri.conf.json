@@ -19,7 +19,11 @@
         "minHeight": 480,
         "dragDropEnabled": true,
         "transparent": true,
-        "windowEffects": { "effects": ["mica"] }
+        "windowEffects": {
+          "effects": [
+            "mica"
+          ]
+        }
       }
     ],
     "security": {
@@ -28,7 +32,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": [
+      "nsis",
+      "msi"
+    ],
     "category": "Education",
     "shortDescription": "Japanese dictionary reader",
     "longDescription": "Read EPWING and Yomitan dictionaries with vertical text.",
@@ -39,5 +46,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "neojpdict"
+        ]
+      }
+    }
   }
 }

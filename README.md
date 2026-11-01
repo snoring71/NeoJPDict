@@ -2,17 +2,34 @@
 
 A Windows 11 dictionary app for Japanese that reads **Yomitan/Yomichan** and **EPWING** dictionaries and shows entries in **vertical text (縦書き)**. The layout takes its cues from 物書堂's 辞書 app: search and per-dictionary results on the left, a book-like reader on the right.
 
-> Status: early development. Yomitan import, search and the vertical reader work. EPWING support is the next milestone.
+> Status: early development, but feature-complete for everyday use.
 
 ## Features
 
-- Import Yomitan/Yomichan `.zip` dictionaries (formats 1–3): terms, kanji, tags, frequency and pitch-accent data, images and dictionary styles.
-- One search across every dictionary, grouped by dictionary, with 前方/完全/後方/部分 matching, kana and width folding (ベンリ = べんり = ﾍﾞﾝﾘ) and deinflection (食べなかった → 食べる).
-- Vertical reader with right-to-left scrolling (mouse wheel moves through the columns), automatic fallback to horizontal for English-heavy entries or tables, and a per-entry and per-dictionary override.
-- Pitch accent and frequency shown in the entry header; links inside entries jump to that word.
-- History, bookmarks, browsing a dictionary in reading order, previous/next headword.
-- Dictionary groups (国語, 和英 …) as tabs, reordering, enable/disable.
-- Japanese and English UI, light and dark themes, Mica backdrop on Windows 11.
+**Dictionaries**
+- Imports Yomitan/Yomichan `.zip` dictionaries (formats 1–3). That covers terms, kanji, tags, frequency and pitch-accent data, images and dictionary styles.
+- Reads EPWING books in place: gaiji, colour and monochrome graphics, sound, cross-references, and the book's menu and copyright pages.
+- Groups (国語, 和英 …), reordering, renaming, a font per dictionary and a text direction per dictionary.
+
+**Search**
+- One search covers every dictionary, with results grouped by dictionary.
+- 前方 / 完全 / 後方 / 部分 matching, `*` / `?` wildcards and regular expressions.
+- Kana and width folding (ベンリ = べんり = ﾍﾞﾝﾘ), romaji input (`kakeru`) and deinflection (食べなかった → 食べる).
+- 慣用句 (idioms), 用例 (examples) and 全文 (full-text) search, with the matching text shown under each hit.
+- "Did you mean" suggestions, and finding kanji by their parts (部品).
+
+**Reader**
+- Vertical text (縦書き) that scrolls right to left. It falls back to horizontal for English-heavy entries and tables, and you can switch either way.
+- Marks such as brackets and accent drops are turned for vertical text.
+- Select-to-look-up, highlighter markers, find in entry, back / forward, and copy and print.
+- Pitch accent and frequency are shown in the entry header.
+
+**Everyday use**
+- History by day with lookup counts. Bookmarks with folders and notes, exported as CSV.
+- Backup and restore of bookmarks, markers and history.
+- A system-wide lookup shortcut (Ctrl+Alt+J) and clipboard lookup.
+- `neojpdict://search/言葉` links, keep-on-top and a compact window.
+- Japanese and English UI, light and dark themes, paper colours, and the Mica backdrop on Windows 11.
 
 ## Download
 

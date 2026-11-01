@@ -422,6 +422,8 @@ pub fn run() {
     tauri::Builder::default()
         // A second launch focuses the running window instead of opening another.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| bring_forward(app)))
+        // neojpdict://search/<word> links (the installer registers the scheme).
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -444,6 +446,12 @@ pub fn run() {
             let lib = Library::open(&db_path).map_err(|e| e.to_string())?;
             app.manage(AppState { lib: Mutex::new(lib), db_path, epwing: EpwingStore::default() });
             spawn_indexer(app.handle().clone());
+            // Also register the link scheme at run time, so a copied or portable app works.
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register_all();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

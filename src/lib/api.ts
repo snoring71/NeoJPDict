@@ -69,6 +69,35 @@ export async function onIndexProgress(cb: (e: IndexEvent) => void): Promise<() =
   return listen<IndexEvent>("index-progress", (ev) => cb(ev.payload));
 }
 
+/**
+ * The word in a neojpdict:// link: neojpdict://search/掛ける or neojpdict://search?q=掛ける.
+ * Returns null for anything else.
+ */
+export function linkQuery(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "neojpdict:") return null;
+    const q = u.searchParams.get("q") ?? u.searchParams.get("text") ?? decodeURIComponent(u.pathname.replace(/^\/+/, ""));
+    return q.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Links opened while running (or that launched the app). */
+export async function onDeepLink(cb: (query: string) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+  const handle = (urls: string[] | null) => {
+    for (const u of urls ?? []) {
+      const q = linkQuery(u);
+      if (q) cb(q);
+    }
+  };
+  handle(await getCurrent().catch(() => null));
+  return onOpenUrl(handle);
+}
+
 /** The system-wide lookup shortcut was pressed. */
 export async function onGlobalLookup(cb: () => void): Promise<() => void> {
   if (!inTauri) return () => {};
