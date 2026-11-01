@@ -811,13 +811,16 @@
     position: relative;
     padding-inline-start: 0.9em;
   }
+  /* Red dot before the phrase, centred on its first line (as printed 国語辞典 mark 句). */
   .entry-body :global(.sub-entry)::before {
-    content: "●";
+    content: "";
     position: absolute;
     inset-inline-start: 0;
-    inset-block-start: 0.35em;
-    font-size: 0.55em;
-    color: var(--accent-text);
+    inset-block-start: calc(0.5lh - 0.21em);
+    width: 0.42em;
+    height: 0.42em;
+    border-radius: 50%;
+    background: #e03c22;
   }
   .entry-body :global(.ep-deco-1) {
     font-style: italic;
