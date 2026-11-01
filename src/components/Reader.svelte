@@ -281,6 +281,22 @@
     return (box.textContent ?? "").replace(/\s+/g, "").trim();
   }
 
+  /** Ctrl+C in an entry copies the text without ruby readings (椅子, not 椅子いす). */
+  function copySelection(e: ClipboardEvent) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !e.clipboardData) return;
+    const box = document.createElement("div");
+    box.append(sel.getRangeAt(0).cloneContents());
+    box.querySelectorAll("rt, rp").forEach((n) => n.remove());
+    // innerText keeps line breaks between blocks; it needs the box in the document.
+    box.style.cssText = "position:fixed;left:-99999px;top:0;writing-mode:horizontal-tb";
+    document.body.append(box);
+    const text = box.innerText;
+    box.remove();
+    e.clipboardData.setData("text/plain", text);
+    e.preventDefault();
+  }
+
   function selectionDone(e: MouseEvent) {
     setTimeout(() => {
       const sel = window.getSelection();
@@ -468,6 +484,7 @@
       onwheel={wheel}
       onclick={click}
       onmouseup={selectionDone}
+      oncopy={copySelection}
       onscroll={() => (pick = null)}>
       <article class="entry" lang="ja">
         {#if body.own}
