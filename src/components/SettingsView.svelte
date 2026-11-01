@@ -3,6 +3,7 @@
   import { t } from "../lib/i18n";
   import { api, pickBackupPath, setGlobalShortcut } from "../lib/api";
   import { app } from "../lib/store.svelte";
+  import { FONT_IDS, FONT_PRESETS, FONT_WEIGHTS, WEIGHT_LABELS, fontFamily } from "../lib/fonts";
 
   let backupNote = $state("");
 
@@ -101,9 +102,22 @@
 
     <label for="s-font">{t("font")}</label>
     <select id="s-font" bind:value={settings.font} onchange={saveSettings}>
-      <option value="mincho">{t("mincho")}</option>
-      <option value="gothic">{t("gothic")}</option>
+      {#each FONT_IDS as id}
+        <option value={id}>{t(FONT_PRESETS[id].label)}</option>
+      {/each}
     </select>
+
+    <label for="s-weight">{t("fontWeight")}</label>
+    <select id="s-weight" bind:value={settings.fontWeight} onchange={saveSettings}>
+      {#each FONT_WEIGHTS as w}
+        <option value={w}>{t(WEIGHT_LABELS[w])}</option>
+      {/each}
+    </select>
+
+    <span></span>
+    <p class="font-sample" lang="ja" style:font-family={fontFamily(settings.font, settings.fontWeight)} style:font-weight={settings.fontWeight}>
+      辞書を引く「あいうえお」ー
+    </p>
 
     <label for="s-paper">{t("paper")}</label>
     <select id="s-paper" bind:value={settings.paper} onchange={saveSettings}>
@@ -191,6 +205,12 @@
   .keycap.recording {
     border-color: var(--accent);
     color: var(--accent-text);
+  }
+  .font-sample {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.5;
+    color: var(--text-1);
   }
   .hint {
     font-size: 12px;

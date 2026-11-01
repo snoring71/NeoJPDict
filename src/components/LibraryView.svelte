@@ -3,6 +3,7 @@
   import { t } from "../lib/i18n";
   import { api, inTauri, pickDictionaryFiles, pickEpwingFolder } from "../lib/api";
   import type { DictionaryInfo, WritingMode } from "../lib/types";
+  import { FONT_IDS, FONT_PRESETS, isFontId } from "../lib/fonts";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
 
@@ -25,7 +26,6 @@
     await app.refreshDictionaries();
   }
 
-  const FONT_PRESETS = ["", "mincho", "gothic"];
 
   async function move(i: number, delta: number) {
     const ids = app.dictionaries.map((d) => d.id);
@@ -130,14 +130,15 @@
         </label>
         <label class="field">
           <span>{t("font")}</span>
-          {#if FONT_PRESETS.includes(d.font ?? "")}
+          {#if !d.font || isFontId(d.font)}
             <select value={d.font ?? ""} onchange={(e) => {
               const v = (e.target as HTMLSelectElement).value;
               setFont(d, v === "custom" ? (prompt(t("fontFamilyPrompt"), "Yu Mincho") ?? "").trim() : v);
             }}>
               <option value="">{t("appDefault")}</option>
-              <option value="mincho">{t("mincho")}</option>
-              <option value="gothic">{t("gothic")}</option>
+              {#each FONT_IDS as id}
+                <option value={id}>{t(FONT_PRESETS[id].label)}</option>
+              {/each}
               <option value="custom">{t("customFont")}</option>
             </select>
           {:else}
