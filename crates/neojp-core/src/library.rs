@@ -56,6 +56,8 @@ CREATE INDEX IF NOT EXISTS terms_reading ON terms(reading_key);
 CREATE INDEX IF NOT EXISTS terms_expr_rev    ON terms(expr_rev);
 CREATE INDEX IF NOT EXISTS terms_reading_rev ON terms(reading_rev);
 CREATE INDEX IF NOT EXISTS terms_browse  ON terms(dict_id, sort_key, id);
+CREATE INDEX IF NOT EXISTS terms_locator ON terms(dict_id, locator) WHERE locator != '';
+CREATE INDEX IF NOT EXISTS terms_rules ON terms(dict_id) WHERE rules != '';
 
 CREATE TABLE IF NOT EXISTS term_meta (
     dict_id    INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE,
@@ -90,6 +92,16 @@ CREATE TABLE IF NOT EXISTS history (
     viewed_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS markers (
+    id         INTEGER PRIMARY KEY,
+    term_id    INTEGER NOT NULL,
+    dict_id    INTEGER NOT NULL,
+    text       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT 'yellow',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS markers_term ON markers(term_id);
+
 CREATE TABLE IF NOT EXISTS bookmarks (
     id         INTEGER PRIMARY KEY,
     term_id    INTEGER NOT NULL UNIQUE,
@@ -120,6 +132,31 @@ pub struct DictionaryInfo {
     pub term_count: i64,
     pub meta_count: i64,
     pub kanji_count: i64,
+    /// Where the dictionary was imported from (the book folder for EPWING).
+    pub source_path: String,
+    /// The title the dictionary was imported with; `title` is the name the user gave it, if any.
+    pub original_title: String,
+    /// Font family for entry text ('' = the app default).
+    pub font: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Marker {
+    pub id: i64,
+    pub text: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkerRow {
+    pub id: i64,
+    pub term_id: i64,
+    pub dict_id: i64,
+    pub expression: String,
+    pub reading: String,
+    pub text: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -159,6 +196,14 @@ pub enum MatchMode {
     Prefix,
     Suffix,
     Contains,
+    /// Anywhere in an entry's text (needs the full-text index).
+    FullText,
+    /// Phrase headwords (慣用句) that contain the query, such as 手を焼く for 手.
+    Idiom,
+    /// Example sentences (用例, text in 「」) that contain the query.
+    Example,
+    /// Regular expression over headwords and readings (パターン検索).
+    Regex,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -193,6 +238,9 @@ pub struct SearchHit {
     pub reading: String,
     /// Set when the hit came from deinflecting the query, e.g. "past · negative".
     pub deinflection: Option<String>,
+    /// For full-text and example searches: the text around the match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,6 +284,14 @@ pub struct HistoryItem {
     pub expression: String,
     pub reading: String,
     pub at: String,
+    /// Bookmarks only: user folder and note.
+    #[serde(default)]
+    pub folder: String,
+    #[serde(default)]
+    pub note: String,
+    /// How many times the entry was looked up.
+    #[serde(default)]
+    pub views: i64,
 }
 
 pub struct Library {
@@ -245,6 +301,7 @@ pub struct Library {
 /// Body loader for dictionaries whose entries live outside SQLite (EPWING).
 pub trait ExternalBodies {
     fn body(&self, dict: &DictionaryInfo, locator: &str) -> Result<String>;
+    fn media(&self, dict: &DictionaryInfo, path: &str) -> Result<Option<Vec<u8>>>;
 }
 
 impl Library {
@@ -262,8 +319,46 @@ impl Library {
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
         )?;
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(crate::fulltext::SCHEMA)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        Self::register_functions(&conn)?;
+        // Lookup counts in history (added after the first release).
+        let has_views: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('history') WHERE name='views'")?
+            .exists([])?;
+        if !has_views {
+            conn.execute_batch("ALTER TABLE history ADD COLUMN views INTEGER NOT NULL DEFAULT 1")?;
+        }
+        // Per-dictionary display name and font (added later).
+        let has_alias: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('dictionaries') WHERE name='alias'")?
+            .exists([])?;
+        if !has_alias {
+            conn.execute_batch(
+                "ALTER TABLE dictionaries ADD COLUMN alias TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE dictionaries ADD COLUMN font TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self { conn })
+    }
+
+    /// `x REGEXP pattern`, with the compiled pattern cached per statement.
+    fn register_functions(conn: &Connection) -> Result<()> {
+        use rusqlite::functions::FunctionFlags;
+        conn.create_scalar_function(
+            "regexp",
+            2,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| {
+                let re = ctx.get_or_create_aux(0, |v| -> std::result::Result<regex::Regex, Box<dyn std::error::Error + Send + Sync>> {
+                    Ok(regex::RegexBuilder::new(v.as_str()?).size_limit(1 << 20).build()?)
+                })?;
+                let text = ctx.get_raw(1).as_str().unwrap_or("");
+                Ok(re.is_match(text))
+            },
+        )?;
+        Ok(())
     }
 
     pub fn connection(&self) -> &Connection {
@@ -272,8 +367,9 @@ impl Library {
 
     pub fn dictionaries(&self) -> Result<Vec<DictionaryInfo>> {
         let mut st = self.conn.prepare(
-            "SELECT id, kind, title, revision, author, description, attribution, url, group_name,
-                    sort_order, enabled, writing_mode, term_count, meta_count, kanji_count
+            "SELECT id, kind, CASE WHEN alias != '' THEN alias ELSE title END, revision, author, description,
+                    attribution, url, group_name, sort_order, enabled, writing_mode, term_count, meta_count,
+                    kanji_count, source_path, title, font
              FROM dictionaries ORDER BY sort_order, id",
         )?;
         let rows = st.query_map([], |r| {
@@ -293,6 +389,9 @@ impl Library {
                 term_count: r.get(12)?,
                 meta_count: r.get(13)?,
                 kanji_count: r.get(14)?,
+                source_path: r.get(15)?,
+                original_title: r.get(16)?,
+                font: r.get(17)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -352,12 +451,14 @@ impl Library {
 
     pub fn delete_dictionary(&self, id: i64) -> Result<()> {
         // Delete children explicitly in chunks-friendly statements; cascades are slow on big tables.
+        self.fulltext_forget(id)?;
         let tx = self.conn.unchecked_transaction()?;
         for table in ["terms", "term_meta", "tags", "media"] {
             tx.execute(&format!("DELETE FROM {table} WHERE dict_id=?1"), [id])?;
         }
         tx.execute("DELETE FROM history WHERE dict_id=?1", [id])?;
         tx.execute("DELETE FROM bookmarks WHERE dict_id=?1", [id])?;
+        tx.execute("DELETE FROM markers WHERE dict_id=?1", [id])?;
         tx.execute("DELETE FROM dictionaries WHERE id=?1", [id])?;
         tx.commit()?;
         Ok(())
@@ -377,6 +478,18 @@ impl Library {
         self.conn.execute(
             "UPDATE dictionaries SET enabled=?2, group_name=?3, writing_mode=?4 WHERE id=?1",
             params![id, enabled as i64, group_name, mode],
+        )?;
+        Ok(())
+    }
+
+    /// Give a dictionary a display name ('' restores the imported title) and an entry font.
+    pub fn update_dictionary_display(&self, id: i64, alias: &str, font: &str) -> Result<()> {
+        let alias = alias.trim();
+        let original: String = self.conn.query_row("SELECT title FROM dictionaries WHERE id=?1", [id], |r| r.get(0))?;
+        let alias = if alias == original { "" } else { alias };
+        self.conn.execute(
+            "UPDATE dictionaries SET alias=?2, font=?3 WHERE id=?1",
+            params![id, alias, font.trim()],
         )?;
         Ok(())
     }
@@ -472,6 +585,35 @@ impl Library {
     // ---------------------------------------------------------------- search
 
     pub fn search(&self, q: &SearchQuery) -> Result<Vec<SearchHit>> {
+        self.search_with(q, None)
+    }
+
+    /// Like `search`, with a body loader so example search can read EPWING entries.
+    /// Search, also trying romaji typed without an IME as kana (kakeru → かける).
+    /// Hits for the text as typed (e.g. English headwords) come first.
+    pub fn search_with(&self, q: &SearchQuery, external: Option<&dyn ExternalBodies>) -> Result<Vec<SearchHit>> {
+        let mut hits = self.search_one(q, external)?;
+        let romaji_modes = matches!(
+            q.mode,
+            MatchMode::Exact | MatchMode::Prefix | MatchMode::Suffix | MatchMode::Contains | MatchMode::Idiom
+        );
+        // An English word that is itself a headword ("time") is not romaji.
+        let typed = q.text.trim().to_lowercase();
+        let is_headword = hits.iter().any(|h| h.expression.to_lowercase() == typed);
+        if romaji_modes && !is_headword {
+            if let Some(kana) = kana::romaji_to_hiragana(&q.text) {
+                let kq = SearchQuery { text: kana, ..q.clone() };
+                let seen: std::collections::HashSet<i64> = hits.iter().map(|h| h.term_id).collect();
+                hits.extend(self.search_one(&kq, external)?.into_iter().filter(|h| !seen.contains(&h.term_id)));
+                if q.limit > 0 {
+                    hits.truncate(q.limit);
+                }
+            }
+        }
+        Ok(hits)
+    }
+
+    fn search_one(&self, q: &SearchQuery, external: Option<&dyn ExternalBodies>) -> Result<Vec<SearchHit>> {
         let key = kana::search_key(q.text.trim());
         if key.is_empty() {
             return Ok(vec![]);
@@ -501,13 +643,61 @@ impl Library {
                 let exactness = if ek == key { 0 } else if rk == key { 1 } else { 2 };
                 let len = ek.chars().count().min(rk.chars().count().max(1)) as i64;
                 hits.push((
-                    SearchHit { term_id, dict_id, expression, reading, deinflection: reason.clone() },
+                    SearchHit { term_id, dict_id, expression, reading, deinflection: reason.clone(), snippet: None },
                     rank * 1_000_000 + exactness * 10_000 + len,
                 ));
             }
         };
 
-        let (sql_cond, arg) = match q.mode {
+        if matches!(q.mode, MatchMode::FullText | MatchMode::Example) {
+            let Some(expr) = crate::fulltext::match_expr(q.text.trim()) else { return Ok(vec![]) };
+            let fetch = if q.mode == MatchMode::Example { q.limit.max(100) * 8 } else { q.limit * 4 };
+            let sql = format!(
+                "SELECT t.id, t.dict_id, t.expression, t.reading, t.expr_key, t.reading_key, t.score
+                 FROM fts JOIN terms t ON t.id = fts.rowid
+                 WHERE fts MATCH ?1 AND +t.dict_id IN ({id_list}) LIMIT {fetch}"
+            );
+            let mut st = self.conn.prepare_cached(&sql)?;
+            let rows = st
+                .query_map([&expr], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let dicts: std::collections::HashMap<i64, &DictionaryInfo> = enabled.iter().map(|d| (d.id, d)).collect();
+            let mut quotes = std::collections::HashMap::new();
+            let rows = if q.mode == MatchMode::Example {
+                rows.into_iter()
+                    .filter(|row| match self.example_quote(row.0, dicts[&row.1], &key, external) {
+                        Some(quote) => {
+                            quotes.insert(row.0, quote);
+                            true
+                        }
+                        None => false,
+                    })
+                    .collect()
+            } else {
+                rows
+            };
+            push(rows, 0, None, &mut hits);
+            let order: std::collections::HashMap<i64, usize> =
+                enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
+            hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
+            let mut out: Vec<SearchHit> = hits.into_iter().take(q.limit).map(|(h, _)| h).collect();
+            for (i, h) in out.iter_mut().enumerate() {
+                h.snippet = if q.mode == MatchMode::Example {
+                    quotes.remove(&h.term_id)
+                } else if i < 150 {
+                    self.fulltext_snippet(h.term_id, dicts[&h.dict_id], q.text.trim(), external)
+                } else {
+                    None
+                };
+            }
+            return Ok(out);
+        }
+
+        // Wildcards: * for any run of characters, ? for exactly one.
+        let wildcard = q.mode != MatchMode::Regex && key.contains(['*', '?']);
+        let (sql_cond, arg) = if wildcard {
+            ("(expr_key GLOB ?1 OR reading_key GLOB ?1)", key.replace(['[', ']'], ""))
+        } else { match q.mode {
             MatchMode::Exact => ("(expr_key = ?1 OR reading_key = ?1)", key.clone()),
             MatchMode::Prefix => (
                 "((expr_key >= ?1 AND expr_key < ?2) OR (reading_key >= ?1 AND reading_key < ?2))",
@@ -524,19 +714,40 @@ impl Library {
                 "(instr(expr_key, ?1) > 0 OR instr(reading_key, ?1) > 0)",
                 key.clone(),
             ),
-        };
+            MatchMode::Idiom => (
+                "((instr(expr_key, ?1) > 0 OR instr(reading_key, ?1) > 0) AND max(length(expr_key), length(reading_key)) >= length(?1) + 2 AND kind = 'term'
+                  AND (instr(expr_key, 'を') + instr(expr_key, 'に') + instr(expr_key, 'が') + instr(expr_key, 'の')
+                     + instr(expr_key, 'も') + instr(expr_key, 'は') + instr(expr_key, 'と') + instr(expr_key, 'で')
+                     + instr(expr_key, 'ば') + instr(expr_key, 'ぬ') + instr(expr_key, 'ず') + instr(expr_key, 'へ')) > 0)",
+                key.clone(),
+            ),
+            MatchMode::Regex => {
+                if regex::Regex::new(q.text.trim()).is_err() {
+                    return Ok(vec![]);
+                }
+                ("(expression REGEXP ?1 OR reading REGEXP ?1 OR reading_key REGEXP ?1)", q.text.trim().to_string())
+            }
+            MatchMode::FullText | MatchMode::Example => unreachable!(),
+        } };
         let rows = self.query_terms(sql_cond, &arg, &id_list, q.limit)?;
+        // A dictionary that has the query itself as a headword doesn't also get guesses
+        // from conjugation (かける should not list かく as "potential" under it).
+        let exact_dicts: std::collections::HashSet<i64> =
+            rows.iter().filter(|r| r.4 == key || r.5 == key).map(|r| r.1).collect();
         push(rows, 0, None, &mut hits);
 
-        if q.deinflect && matches!(q.mode, MatchMode::Exact | MatchMode::Prefix) {
+        if q.deinflect && !wildcard && matches!(q.mode, MatchMode::Exact | MatchMode::Prefix) {
             for cand in crate::deinflect::deinflect(&key) {
                 if cand.term == key {
                     continue;
                 }
-                let rows = self.query_terms("(expr_key = ?1 OR reading_key = ?1)", &cand.term, &id_list, q.limit)?;
+                // Fetch generously: かく has dozens of noun homographs ahead of 書く, and the
+                // word-class filter below runs after the SQL limit.
+                let rows = self.query_terms("(expr_key = ?1 OR reading_key = ?1)", &cand.term, &id_list, q.limit.max(500))?;
                 let rows: Vec<_> = rows
                     .into_iter()
-                    .filter(|row| crate::deinflect::rules_match(cand.required_rule, &self.term_rules(row.0)))
+                    .filter(|row| !exact_dicts.contains(&row.1))
+                    .filter(|row| self.can_inflect(row, &cand))
                     .collect();
                 push(rows, 1, Some(cand.reasons.join(" · ")), &mut hits);
             }
@@ -547,6 +758,142 @@ impl Library {
             enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
         hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
         Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect())
+    }
+
+    /// "Did you mean": headwords one character away from `text` (one substituted,
+    /// dropped or added character, or a long/short vowel or small kana variant).
+    pub fn suggest(&self, text: &str, dict_ids: &[i64], limit: usize) -> Result<Vec<String>> {
+        let key = kana::search_key(text.trim());
+        let chars: Vec<char> = key.chars().collect();
+        if chars.len() < 2 || key.contains(['*', '?', '[', ']']) {
+            return Ok(vec![]);
+        }
+        let ids = if dict_ids.is_empty() {
+            self.dictionaries()?.into_iter().filter(|d| d.enabled).map(|d| d.id).collect::<Vec<_>>()
+        } else {
+            dict_ids.to_vec()
+        };
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let id_list = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        let mut patterns: Vec<String> = vec![];
+        let s = |v: &[char]| v.iter().collect::<String>();
+        // Most likely slips first: small/large kana (じしよ → じしょ), then a dropped,
+        // changed or extra character. The first character stays fixed so every
+        // pattern can use the index.
+        const SMALL: &[(char, char)] = &[
+            ('あ', 'ぁ'), ('い', 'ぃ'), ('う', 'ぅ'), ('え', 'ぇ'), ('お', 'ぉ'), ('つ', 'っ'),
+            ('や', 'ゃ'), ('ゆ', 'ゅ'), ('よ', 'ょ'), ('わ', 'ゎ'),
+        ];
+        for i in 1..chars.len() {
+            if let Some(&(big, small)) = SMALL.iter().find(|(b, sm)| *b == chars[i] || *sm == chars[i]) {
+                let mut v = chars.clone();
+                v[i] = if chars[i] == big { small } else { big };
+                patterns.push(s(&v));
+            }
+        }
+        for i in 1..chars.len() {
+            let mut v = chars.clone();
+            v.remove(i);
+            patterns.push(s(&v));
+        }
+        for i in 1..chars.len() {
+            let mut v = chars.clone();
+            v[i] = '?';
+            patterns.push(s(&v));
+        }
+        for i in 1..=chars.len() {
+            let mut v = chars.clone();
+            v.insert(i, '?');
+            patterns.push(s(&v));
+        }
+        let mut out: Vec<String> = vec![];
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT expression, reading FROM terms
+             WHERE (reading_key GLOB ?1 OR expr_key GLOB ?1) AND +dict_id IN ({id_list}) AND kind='term'
+             ORDER BY score DESC LIMIT 8"
+        ))?;
+        for p in patterns {
+            let rows = st.query_map([&p], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (expr, reading) = row?;
+                let word = if kana::search_key(&expr) == key || expr.is_empty() { reading } else { expr };
+                if !word.is_empty() && kana::search_key(&word) != key && !out.contains(&word) {
+                    out.push(word);
+                }
+            }
+            if out.len() >= limit {
+                break;
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    /// Does the entry have an example (text in 「」 or『』) containing `key`? A dash standing
+    /// for the headword (「━を引く」) counts as the headword.
+    /// Headword, reading and visible text of an entry.
+    fn entry_text(&self, term_id: i64, dict: &DictionaryInfo, external: Option<&dyn ExternalBodies>) -> Option<(String, String, String)> {
+        let (expression, reading, body, locator) = self
+            .conn
+            .query_row("SELECT expression, reading, body, locator FROM terms WHERE id=?1", [term_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            })
+            .ok()?;
+        let html = if body.is_empty() && !locator.is_empty() { external?.body(dict, &locator).ok()? } else { body };
+        Some((expression, reading, crate::fulltext::html_text(&html)))
+    }
+
+    /// The first example (a 「」 or 『』 quote, with ━ standing for the headword) containing `key`.
+    fn example_quote(&self, term_id: i64, dict: &DictionaryInfo, key: &str, external: Option<&dyn ExternalBodies>) -> Option<String> {
+        let (expression, reading, text) = self.entry_text(term_id, dict, external)?;
+        let mut rest = text.as_str();
+        while let Some(open) = rest.find(['「', '『']) {
+            let after = &rest[open + 3..];
+            let close = after.find(['」', '』']).unwrap_or(after.len());
+            let quote = &after[..close];
+            for stand_in in [expression.as_str(), reading.as_str()] {
+                let filled = quote.replace(['━', '─', '―', '—', '〜', '～'], stand_in);
+                if kana::search_key(&filled).contains(key) {
+                    return Some(format!("「{filled}」"));
+                }
+            }
+            rest = &after[close.min(after.len())..];
+        }
+        None
+    }
+
+    /// The text around the first occurrence of `query` in an entry, for a full-text hit.
+    fn fulltext_snippet(&self, term_id: i64, dict: &DictionaryInfo, query: &str, external: Option<&dyn ExternalBodies>) -> Option<String> {
+        let (_, _, text) = self.entry_text(term_id, dict, external)?;
+        snippet_around(&text, query, 16, 40)
+    }
+
+    /// Could this term be the base form that `cand` was deinflected to?
+    fn can_inflect(&self, row: &(i64, i64, String, String, String, String, i64), cand: &crate::deinflect::Candidate) -> bool {
+        let rules = self.term_rules(row.0);
+        if !rules.trim().is_empty() {
+            return crate::deinflect::rules_match(cand.required_rule, &rules);
+        }
+        if self.dict_has_rules(row.1) {
+            // The dictionary marks its verbs and adjectives, so an unmarked term is neither.
+            return false;
+        }
+        // No word classes at all (EPWING): a spelled form must end in the same kana as
+        // the base form, so 書く fits かく but 角 does not.
+        let expr = &row.2;
+        if expr.chars().all(crate::kana::is_kana) {
+            return true;
+        }
+        let last = |s: &str| s.chars().last().map(|c| crate::kana::to_hiragana(&c.to_string()));
+        last(expr).is_some() && last(expr) == last(&cand.term)
+    }
+
+    fn dict_has_rules(&self, dict_id: i64) -> bool {
+        self.conn
+            .query_row("SELECT EXISTS(SELECT 1 FROM terms WHERE dict_id=?1 AND rules != '')", [dict_id], |r| r.get(0))
+            .unwrap_or(false)
     }
 
     fn term_rules(&self, term_id: i64) -> String {
@@ -666,9 +1013,44 @@ impl Library {
         })
     }
 
+    /// The entry at a position inside a dictionary (EPWING cross-references).
+    /// Uses the indexed headword when one starts there, otherwise a bare entry.
+    pub fn entry_at(&self, dict_id: i64, locator: &str, external: Option<&dyn ExternalBodies>) -> Result<Entry> {
+        let found: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM terms WHERE dict_id=?1 AND locator=?2 AND locator != '' ORDER BY id LIMIT 1",
+                params![dict_id, locator],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = found {
+            return self.entry(id, external);
+        }
+        let dict = self.dictionary(dict_id)?;
+        let html = match external {
+            Some(ext) => ext.body(&dict, locator)?,
+            None => String::new(),
+        };
+        Ok(Entry {
+            term_id: 0,
+            dict_id,
+            dict_title: dict.title,
+            kind: "term".into(),
+            expression: String::new(),
+            reading: String::new(),
+            tags: vec![],
+            html,
+            styles: String::new(),
+            frequencies: vec![],
+            pitches: vec![],
+            bookmarked: false,
+        })
+    }
+
     fn meta_for(&self, expression: &str, reading: &str) -> Result<(Vec<MetaInfo>, Vec<MetaInfo>)> {
         let mut st = self.conn.prepare_cached(
-            "SELECT d.title, m.mode, m.data FROM term_meta m JOIN dictionaries d ON d.id = m.dict_id
+            "SELECT CASE WHEN d.alias != '' THEN d.alias ELSE d.title END, m.mode, m.data FROM term_meta m JOIN dictionaries d ON d.id = m.dict_id
              WHERE m.expression=?1 AND d.enabled=1 ORDER BY d.sort_order",
         )?;
         let rows = st.query_map([expression], |r| {
@@ -713,6 +1095,7 @@ impl Library {
                         expression: r.get(2)?,
                         reading: r.get(3)?,
                         deinflection: None,
+                        snippet: None,
                     })
                 })
                 .optional()?)
@@ -729,19 +1112,22 @@ impl Library {
     }
 
     /// A page of headwords in reading order, for browse mode.
-    pub fn browse(&self, dict_id: i64, after: Option<&str>, limit: usize) -> Result<Vec<SearchHit>> {
+    /// Headwords of one dictionary in reading order, starting at `after` (a reading prefix),
+    /// skipping `offset` rows for paging.
+    pub fn browse(&self, dict_id: i64, after: Option<&str>, offset: usize, limit: usize) -> Result<Vec<SearchHit>> {
         let mut st = self.conn.prepare_cached(
             "SELECT id, dict_id, expression, reading FROM terms
-             WHERE dict_id=?1 AND sort_key >= ?2 ORDER BY sort_key, id LIMIT ?3",
+             WHERE dict_id=?1 AND sort_key >= ?2 ORDER BY sort_key, id LIMIT ?3 OFFSET ?4",
         )?;
         let start = after.map(kana::search_key).unwrap_or_default();
-        let rows = st.query_map(params![dict_id, start, limit as i64], |r| {
+        let rows = st.query_map(params![dict_id, start, limit as i64, offset as i64], |r| {
             Ok(SearchHit {
                 term_id: r.get(0)?,
                 dict_id: r.get(1)?,
                 expression: r.get(2)?,
                 reading: r.get(3)?,
                 deinflection: None,
+                snippet: None,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -755,11 +1141,17 @@ impl Library {
             [term_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
-        // Re-opening the same entry moves it to the top instead of duplicating it.
+        // Re-opening the same entry moves it to the top instead of duplicating it,
+        // and counts how often it was looked up.
+        let views: i64 = self
+            .conn
+            .query_row("SELECT views FROM history WHERE term_id=?1", [term_id], |r| r.get(0))
+            .optional()?
+            .unwrap_or(0);
         self.conn.execute("DELETE FROM history WHERE term_id=?1", [term_id])?;
         self.conn.execute(
-            "INSERT INTO history (term_id, dict_id, expression, reading) VALUES (?1, ?2, ?3, ?4)",
-            params![term_id, dict_id, expression, reading],
+            "INSERT INTO history (term_id, dict_id, expression, reading, views) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![term_id, dict_id, expression, reading, views + 1],
         )?;
         self.conn.execute(
             "DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 2000)",
@@ -770,13 +1162,64 @@ impl Library {
 
     pub fn history(&self, limit: usize) -> Result<Vec<HistoryItem>> {
         self.list_items(
-            "SELECT id, term_id, dict_id, expression, reading, viewed_at FROM history ORDER BY id DESC LIMIT ?1",
+            "SELECT id, term_id, dict_id, expression, reading, viewed_at, '', '', views FROM history ORDER BY id DESC LIMIT ?1",
             limit,
         )
     }
 
     pub fn clear_history(&self) -> Result<()> {
         self.conn.execute("DELETE FROM history", [])?;
+        Ok(())
+    }
+
+    /// Highlighter marks the user drew in an entry.
+    pub fn markers(&self, term_id: i64) -> Result<Vec<Marker>> {
+        let mut st = self.conn.prepare("SELECT id, text, color FROM markers WHERE term_id=?1 ORDER BY id")?;
+        let rows = st.query_map([term_id], |r| Ok(Marker { id: r.get(0)?, text: r.get(1)?, color: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Every highlight, newest first, with the entry it is in.
+    pub fn all_markers(&self) -> Result<Vec<MarkerRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT m.id, m.term_id, m.dict_id, t.expression, t.reading, m.text, m.color
+             FROM markers m JOIN terms t ON t.id = m.term_id ORDER BY m.id DESC",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(MarkerRow {
+                id: r.get(0)?,
+                term_id: r.get(1)?,
+                dict_id: r.get(2)?,
+                expression: r.get(3)?,
+                reading: r.get(4)?,
+                text: r.get(5)?,
+                color: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn add_marker(&self, term_id: i64, text: &str, color: &str) -> Result<i64> {
+        let color = match color {
+            "pink" | "blue" | "green" => color,
+            _ => "yellow",
+        };
+        self.conn.execute(
+            "INSERT INTO markers(term_id, dict_id, text, color) SELECT id, dict_id, ?2, ?3 FROM terms WHERE id=?1",
+            params![term_id, text.trim(), color],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Distinct entry positions of a dictionary (developer aid).
+    pub fn locators(&self, dict_id: i64) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT DISTINCT locator FROM terms WHERE dict_id=?1 AND locator != ''")?;
+        let rows = st.query_map([dict_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn remove_marker(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM markers WHERE id=?1", [id])?;
         Ok(())
     }
 
@@ -793,9 +1236,35 @@ impl Library {
         Ok(())
     }
 
+    /// Set a bookmark's folder and note (bookmarking the entry if needed).
+    pub fn update_bookmark(&self, term_id: i64, folder: &str, note: &str) -> Result<()> {
+        self.set_bookmark(term_id, true)?;
+        self.conn.execute(
+            "UPDATE bookmarks SET folder=?2, note=?3 WHERE term_id=?1",
+            params![term_id, folder.trim(), note],
+        )?;
+        Ok(())
+    }
+
+    /// Bookmarks as CSV (headword, reading, dictionary, folder, note, date), with a BOM so Excel reads UTF-8.
+    pub fn bookmarks_csv(&self) -> Result<String> {
+        let titles: std::collections::HashMap<i64, String> =
+            self.dictionaries()?.into_iter().map(|d| (d.id, d.title)).collect();
+        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        let mut out = String::from("\u{FEFF}headword,reading,dictionary,folder,note,added\r\n");
+        for b in self.bookmarks()? {
+            let title = titles.get(&b.dict_id).map(String::as_str).unwrap_or("");
+            out.push_str(&[q(&b.expression), q(&b.reading), q(title), q(&b.folder), q(&b.note), q(&b.at)].join(","));
+            out.push_str("\r\n");
+        }
+        Ok(out)
+    }
+
     pub fn bookmarks(&self) -> Result<Vec<HistoryItem>> {
         self.list_items(
-            "SELECT id, term_id, dict_id, expression, reading, created_at FROM bookmarks ORDER BY id DESC LIMIT ?1",
+            "SELECT b.id, b.term_id, b.dict_id, b.expression, b.reading, b.created_at, b.folder, b.note,
+                    coalesce((SELECT views FROM history h WHERE h.term_id = b.term_id), 0)
+             FROM bookmarks b ORDER BY b.id DESC LIMIT ?1",
             100_000,
         )
     }
@@ -810,8 +1279,56 @@ impl Library {
                 expression: r.get(3)?,
                 reading: r.get(4)?,
                 at: r.get(5)?,
+                folder: r.get(6)?,
+                note: r.get(7)?,
+                views: r.get(8)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_and_font() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib.insert_dictionary(&NewDictionary { kind: "yomitan".into(), title: "大辞林 第四版".into(), ..Default::default() }).unwrap();
+        lib.update_dictionary_display(id, " 大辞林 ", "gothic").unwrap();
+        let d = lib.dictionary(id).unwrap();
+        assert_eq!((d.title.as_str(), d.original_title.as_str(), d.font.as_str()), ("大辞林", "大辞林 第四版", "gothic"));
+        // Duplicate detection still uses the imported title.
+        assert_eq!(lib.find_dictionary("大辞林 第四版", "").unwrap(), Some(id));
+        lib.update_dictionary_display(id, "", "").unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().title, "大辞林 第四版");
+    }
+}
+
+/// Up to `before` characters before and `after` after the first match of `query` in `text`
+/// (kana-, width- and case-insensitive), on one line, with … where text was cut.
+pub(crate) fn snippet_around(text: &str, query: &str, before: usize, after: usize) -> Option<String> {
+    let fold = |c: char| -> char {
+        let s = kana::to_hiragana(&kana::fold_width(&c.to_string())).to_lowercase();
+        s.chars().next().unwrap_or(c)
+    };
+    let chars: Vec<char> = text.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).collect();
+    let folded: Vec<char> = chars.iter().map(|&c| fold(c)).collect();
+    let want: Vec<char> = query.chars().filter(|c| !c.is_whitespace()).map(fold).collect();
+    if want.is_empty() {
+        return None;
+    }
+    let at = folded.windows(want.len()).position(|w| w == want.as_slice())?;
+    let from = at.saturating_sub(before);
+    let to = (at + want.len() + after).min(chars.len());
+    let mut s: String = chars[from..to].iter().collect();
+    s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if from > 0 {
+        s.insert(0, '…');
+    }
+    if to < chars.len() {
+        s.push('…');
+    }
+    Some(s)
 }

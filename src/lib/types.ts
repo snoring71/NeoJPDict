@@ -1,4 +1,5 @@
-export type MatchMode = "exact" | "prefix" | "suffix" | "contains";
+export type HeadwordMode = "exact" | "prefix" | "suffix" | "contains" | "regex";
+export type MatchMode = HeadwordMode | "fullText" | "idiom" | "example";
 export type WritingMode = "auto" | "vertical" | "horizontal";
 
 export interface DictionaryInfo {
@@ -17,6 +18,10 @@ export interface DictionaryInfo {
   termCount: number;
   metaCount: number;
   kanjiCount: number;
+  /** The imported title, when `title` is a name the user gave the dictionary. */
+  originalTitle: string;
+  /** Entry font: '' (app default), 'mincho', 'gothic' or a font family name. */
+  font: string;
 }
 
 export interface SearchQuery {
@@ -33,6 +38,8 @@ export interface SearchHit {
   expression: string;
   reading: string;
   deinflection: string | null;
+  /** Full-text and example searches: the text around the match. */
+  snippet?: string;
 }
 
 export interface TagInfo {
@@ -75,6 +82,9 @@ export interface HistoryItem {
   expression: string;
   reading: string;
   at: string;
+  folder?: string;
+  note?: string;
+  views?: number;
 }
 
 export interface ImportEvent {
@@ -85,4 +95,14 @@ export interface ImportEvent {
   total: number;
   error: string | null;
   finished: boolean;
+}
+
+export interface MarkerRow {
+  id: number;
+  termId: number;
+  dictId: number;
+  expression: string;
+  reading: string;
+  text: string;
+  color: string;
 }
