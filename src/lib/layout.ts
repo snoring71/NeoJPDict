@@ -56,6 +56,8 @@ function turns(img: HTMLImageElement): { w: number; h: number } | null {
 }
 
 const KANA_RUBY = /^\s*[(（]([ぁ-ゟァ-ヿー・･]+)[)）]\s*$/;
+// EPWING writes readings bare: 椅子<sup>いす</sup>.
+const BARE_RUBY = /^\s*([ぁ-ゟァ-ヿー]{1,12})\s*$/;
 const KANJI_TAIL = /[㐀-䶿一-鿿豈-﫿々〆ヶ]{1,4}$/;
 
 function isRaised(el: HTMLElement): boolean {
@@ -67,7 +69,7 @@ function isRaised(el: HTMLElement): boolean {
 function realRuby(root: HTMLElement) {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>("sup, span[style*='super']"))) {
     if (!isRaised(el) || el.querySelector("img, ruby")) continue;
-    const m = el.textContent?.match(KANA_RUBY);
+    const m = el.textContent?.match(KANA_RUBY) ?? el.textContent?.match(BARE_RUBY);
     if (!m) continue;
     // The raised reading may be wrapped (span > span); climb to the outermost raised box.
     let box: HTMLElement = el;

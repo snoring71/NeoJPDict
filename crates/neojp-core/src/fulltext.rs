@@ -131,7 +131,9 @@ pub fn html_text(html: &str) -> String {
         if !closing && skip.is_none() && (name == "sup" || tag.contains("vertical-align:super")) {
             let after_tag = &after[end.min(after.len())..];
             let text = &after_tag[..after_tag.find('<').unwrap_or(after_tag.len())];
-            skip_text = is_raised_reading(text);
+            // A bare reading (EPWING: 椅子<sup>いす</sup>) only counts right after a kanji.
+            let after_kanji = out.chars().last().is_some_and(|c| kana::is_kanji(c) || c == '々');
+            skip_text = is_raised_reading(text) || (after_kanji && is_bare_reading(text));
         }
         match skip {
             Some(s) if closing && name == s => skip = None,
@@ -163,6 +165,12 @@ fn is_raised_reading(text: &str) -> bool {
     matches!(inner, Some(k) if !k.is_empty() && k.chars().all(|c| kana::is_kana(c) || c == 'ー' || c == '・'))
 }
 
+/// "いす": a reading without brackets.
+fn is_bare_reading(text: &str) -> bool {
+    let t = text.trim();
+    !t.is_empty() && t.chars().count() <= 12 && t.chars().all(|c| kana::is_kana(c) || c == 'ー')
+}
+
 fn push_decoded(out: &mut String, s: &str) {
     if !s.contains('&') {
         out.push_str(s);
@@ -181,7 +189,7 @@ fn push_decoded(out: &mut String, s: &str) {
 impl Library {
     /// Dictionaries whose bodies are in the full-text index.
     pub fn fulltext_ready(&self) -> Result<Vec<i64>> {
-        let mut st = self.conn.prepare("SELECT dict_id FROM fts_dicts WHERE state='v2'")?;
+        let mut st = self.conn.prepare("SELECT dict_id FROM fts_dicts WHERE state='v3'")?;
         let ids = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
         Ok(ids)
     }
@@ -189,7 +197,7 @@ impl Library {
     /// Dictionaries that still need indexing.
     pub fn fulltext_pending(&self) -> Result<Vec<i64>> {
         let mut st = self.conn.prepare(
-            "SELECT id FROM dictionaries WHERE id NOT IN (SELECT dict_id FROM fts_dicts WHERE state='v2')
+            "SELECT id FROM dictionaries WHERE id NOT IN (SELECT dict_id FROM fts_dicts WHERE state='v3')
              AND term_count > 0 ORDER BY sort_order, id",
         )?;
         let ids = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
@@ -246,7 +254,7 @@ impl Library {
             }
         }
         self.conn.execute(
-            "INSERT OR REPLACE INTO fts_dicts(dict_id, state) VALUES (?1, 'v2')",
+            "INSERT OR REPLACE INTO fts_dicts(dict_id, state) VALUES (?1, 'v3')",
             [dict.id],
         )?;
         Ok(true)
@@ -275,6 +283,8 @@ mod tests {
             "「椅子に腰を━」"
         );
         assert_eq!(html_text("x<sup>(2)</sup>"), "x(2)");
+        assert_eq!(html_text("「椅子<sup>いす</sup>に腰を─」"), "「椅子に腰を─」");
+        assert_eq!(html_text("ね<sup>ア</sup>"), "ねア");
     }
 
     #[test]
