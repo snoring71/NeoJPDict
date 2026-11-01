@@ -13,6 +13,8 @@ export interface Settings {
   clipboardLookup: boolean;
   /** Keep the window above other windows. */
   onTop: boolean;
+  /** System-wide shortcut that brings the window forward and looks up the clipboard ('' = off). */
+  globalShortcut: string;
 }
 
 const defaults: Settings = {
@@ -24,6 +26,7 @@ const defaults: Settings = {
   paper: "theme",
   clipboardLookup: false,
   onTop: false,
+  globalShortcut: "Ctrl+Alt+J",
 };
 
 function load(): Settings {

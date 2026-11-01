@@ -365,9 +365,46 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Bring the main window to the front (restoring it if minimised).
+fn bring_forward(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Set the system-wide shortcut that brings NeoJPDict forward and looks up the clipboard.
+/// An empty string turns it off.
+#[tauri::command]
+fn set_global_shortcut(app: AppHandle, accelerator: String) -> CmdResult<()> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let gs = app.global_shortcut();
+    gs.unregister_all().map_err(err)?;
+    let accelerator = accelerator.trim();
+    if accelerator.is_empty() {
+        return Ok(());
+    }
+    let shortcut: Shortcut = accelerator.parse().map_err(|e| format!("{e}"))?;
+    gs.register(shortcut).map_err(err)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri_plugin_global_shortcut::ShortcutState;
     tauri::Builder::default()
+        // A second launch focuses the running window instead of opening another.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| bring_forward(app)))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        bring_forward(app);
+                        let _ = app.emit("global-lookup", ());
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .register_uri_scheme_protocol("njmedia", |ctx, request| {
@@ -401,6 +438,7 @@ pub fn run() {
             update_dictionary,
             reorder_dictionaries,
             update_dictionary_display,
+            set_global_shortcut,
             import_dictionaries,
         ])
         .run(tauri::generate_context!())

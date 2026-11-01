@@ -63,6 +63,19 @@ export async function onIndexProgress(cb: (e: IndexEvent) => void): Promise<() =
   return listen<IndexEvent>("index-progress", (ev) => cb(ev.payload));
 }
 
+/** The system-wide lookup shortcut was pressed. */
+export async function onGlobalLookup(cb: () => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("global-lookup", () => cb());
+}
+
+/** Register the system-wide lookup shortcut ('' turns it off). Rejects if another app owns it. */
+export async function setGlobalShortcut(accelerator: string): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("set_global_shortcut", { accelerator });
+}
+
 export async function onFileDrop(cb: (paths: string[]) => void, hover: (on: boolean) => void) {
   if (!inTauri) return () => {};
   const { getCurrentWebview } = await import("@tauri-apps/api/webview");

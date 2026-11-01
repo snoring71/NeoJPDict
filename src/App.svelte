@@ -3,7 +3,7 @@
   import { app, type View } from "./lib/store.svelte";
   import { settings } from "./lib/settings.svelte";
   import { t, lang, type MessageKey } from "./lib/i18n";
-  import { api, onFileDrop, onImportProgress, onIndexProgress, readClipboard, setAlwaysOnTop } from "./lib/api";
+  import { api, onFileDrop, onGlobalLookup, onImportProgress, onIndexProgress, readClipboard, setAlwaysOnTop, setGlobalShortcut } from "./lib/api";
   import Icon from "./components/Icon.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Reader from "./components/Reader.svelte";
@@ -52,8 +52,14 @@
   /** Clipboard lookup: when the window comes to the front, search newly copied Japanese text. */
   async function windowFocused() {
     if (!settings.clipboardLookup) return;
+    await clipboardLookup(false);
+  }
+
+  /** Search the clipboard text. `force` searches it even if it was searched before, and non-Japanese text too. */
+  async function clipboardLookup(force: boolean) {
     const text = (await readClipboard())?.trim() ?? "";
-    if (!text || text === lastClip || text.length > 40 || !/[぀-ヿ㐀-鿿]/.test(text)) return;
+    if (!text || text.length > 40) return;
+    if (!force && (text === lastClip || !/[぀-ヿ㐀-鿿]/.test(text))) return;
     lastClip = text;
     app.view = "search";
     app.searchFor(text.replace(/\s+/g, ""));
@@ -75,6 +81,11 @@
     onIndexProgress((e) => {
       app.indexing = e.finished ? null : { title: e.title, pct: e.total ? Math.floor((e.done * 100) / e.total) : 0 };
     }).then((u) => unsubs.push(u));
+    onGlobalLookup(() => {
+      compact = false;
+      clipboardLookup(true);
+    }).then((u) => unsubs.push(u));
+    setGlobalShortcut(settings.globalShortcut).catch(() => {});
     onFileDrop(startImport, (on) => (app.dragging = on)).then((u) => unsubs.push(u));
 
     const keys = (e: KeyboardEvent) => {

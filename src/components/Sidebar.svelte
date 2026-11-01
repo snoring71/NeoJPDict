@@ -145,7 +145,7 @@
       {/if}
       <div class="segmented" role="tablist">
         {#each targets as tg}
-          <button role="tab" aria-selected={app.target === tg} class:active={app.target === tg} onclick={() => setTarget(tg)}>{t(tg)}</button>
+          <button role="tab" aria-selected={app.target === tg} class:active={app.target === tg} onclick={() => setTarget(tg)}>{t(tg === "headwords" ? "targetHeadwords" : tg)}</button>
         {/each}
       </div>
     </div>
@@ -460,13 +460,16 @@
     white-space: nowrap;
   }
   .segmented button {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: clip;
     white-space: nowrap;
     border: 0;
     background: transparent;
     color: var(--accent-text);
-    padding: 4px 0;
-    font-size: 13.5px;
+    padding: 4px 2px;
+    font-size: 12.5px;
     font-family: var(--font-ui-jp);
     cursor: pointer;
   }

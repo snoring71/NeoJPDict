@@ -19,3 +19,7 @@ serde_json = "1.0.154"
 tauri = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
