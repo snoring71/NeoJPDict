@@ -86,15 +86,19 @@
     padding: 8px 8px;
     margin-top: 4px;
     border: 0;
-    background: transparent;
+    border-radius: 6px;
     color: var(--text-2);
     font-size: 12.5px;
     text-align: left;
     cursor: pointer;
     position: sticky;
     top: 0;
-    background: var(--sidebar-solid);
+    background: var(--group-head);
     z-index: 1;
+  }
+  /* Extra space separates one dictionary's section from the previous one. */
+  .group-head:not(:first-child) {
+    margin-top: 10px;
   }
   .group-title {
     flex: 1;
@@ -109,6 +113,7 @@
     flex: none;
   }
   .hit {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -125,6 +130,22 @@
   }
   .hit:hover {
     background: var(--hover);
+  }
+  /* Inset divider between consecutive rows; hidden next to a hovered or selected row. */
+  .hit + .hit::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 12px;
+    right: 12px;
+    border-top: 1px solid var(--divider);
+    pointer-events: none;
+  }
+  .hit:hover::before,
+  .hit.selected::before,
+  .hit:hover + .hit::before,
+  .hit.selected + .hit::before {
+    border-top-color: transparent;
   }
   .hit.selected {
     background: var(--accent);

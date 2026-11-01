@@ -27,6 +27,8 @@
   --selected: rgb(0 0 0 / 0.06);
   --divider: rgb(0 0 0 / 0.08);
   --divider-strong: rgb(0 0 0 / 0.2);
+  /* Opaque because the result-list group headers are sticky. */
+  --group-head: #f3f3f3;
   --shadow: 0 8px 16px rgb(0 0 0 / 0.14);
   color-scheme: light;
 }
@@ -55,6 +57,7 @@
     --selected: rgb(255 255 255 / 0.08);
     --divider: rgb(255 255 255 / 0.08);
     --divider-strong: rgb(255 255 255 / 0.25);
+    --group-head: #2d2d2d;
     --shadow: 0 8px 16px rgb(0 0 0 / 0.4);
     color-scheme: dark;
   }
@@ -83,6 +86,7 @@
   --selected: rgb(255 255 255 / 0.08);
   --divider: rgb(255 255 255 / 0.08);
   --divider-strong: rgb(255 255 255 / 0.25);
+  --group-head: #2d2d2d;
   --shadow: 0 8px 16px rgb(0 0 0 / 0.4);
   color-scheme: dark;
 }
