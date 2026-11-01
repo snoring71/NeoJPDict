@@ -7,6 +7,7 @@
   import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
+  import { dismiss } from "../lib/dismiss";
 
   let scroller: HTMLElement | undefined = $state();
   let menuOpen = $state(false);
@@ -404,7 +405,7 @@
         <button class="icon" title={t("back")} aria-label={t("back")} disabled={app.backStack.length === 0} onclick={() => app.goBack()}><Icon name="left" /></button>
         <button class="icon" title={t("forward")} aria-label={t("forward")} disabled={app.forwardStack.length === 0} onclick={() => app.goForward()}><Icon name="right" /></button>
       </div>
-      <div class="title-wrap">
+      <div class="title-wrap" use:dismiss={() => (menuOpen = false)}>
         <button class="title" onclick={() => (menuOpen = !menuOpen)} disabled={siblings.length === 0}>
           <DictBadge title={entry.dictTitle} size={24} />
           <span class="title-text">{entry.expression}</span>
@@ -441,7 +442,7 @@
         <button class="icon" title={t("toggleDirection")} aria-pressed={vertical} onclick={toggleDirection}>
           <span class="dir">{vertical ? "縦" : "横"}</span>
         </button>
-        <div class="mark-wrap">
+        <div class="mark-wrap" use:dismiss={() => (moreOpen = false)}>
           <button class="icon" title={copied ? t("copied") : t("more")} aria-label={t("more")} onclick={() => (moreOpen = !moreOpen)}>
             <Icon name={copied ? "check" : "more"} />
           </button>
