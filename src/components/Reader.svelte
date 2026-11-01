@@ -594,6 +594,7 @@
   }
   .title:disabled {
     cursor: default;
+    opacity: 1;
   }
   .title:not(:disabled):hover {
     background: var(--hover);
