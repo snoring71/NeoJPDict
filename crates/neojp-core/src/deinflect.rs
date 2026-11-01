@@ -10,6 +10,9 @@ pub const VS: u32 = 1 << 3; // する
 pub const ADJI: u32 = 1 << 4; // 形容詞 (and ない/たい forms, which conjugate like one)
 pub const MASU: u32 = 1 << 5; // intermediate ます form
 pub const TE: u32 = 1 << 6; // intermediate て form (for ている)
+/// The word as typed. Endings such as past or adverbial can only be undone here,
+/// never on a form that another rule produced (かける → かく must not become かい).
+const RAW: u32 = 1 << 7;
 const ANY: u32 = u32::MAX;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,25 +51,25 @@ const GODAN: &[(&str, &str, &str, &str, &str, &str, &str)] = &[
 fn rules() -> Vec<Rule> {
     let mut v = vec![
         // 一段
-        r("た", "る", ANY, V1, "past"),
-        r("て", "る", ANY | TE, V1, "te-form"),
+        r("た", "る", RAW, V1, "past"),
+        r("て", "る", RAW | TE, V1, "te-form"),
         r("ない", "る", ADJI, V1, "negative"),
-        r("ず", "る", ANY, V1, "negative (zu)"),
+        r("ず", "る", RAW, V1, "negative (zu)"),
         r("ます", "る", MASU, V1, "polite"),
         r("たい", "る", ADJI, V1, "desire"),
         r("られる", "る", V1, V1, "passive/potential"),
         r("れる", "る", V1, V1, "potential (colloquial)"),
         r("させる", "る", V1, V1, "causative"),
-        r("よう", "る", ANY, V1, "volitional"),
-        r("ろ", "る", ANY, V1, "imperative"),
-        r("れば", "る", ANY, V1, "conditional"),
-        r("たら", "る", ANY, V1, "conditional (tara)"),
+        r("よう", "る", RAW, V1, "volitional"),
+        r("ろ", "る", RAW, V1, "imperative"),
+        r("れば", "る", RAW, V1, "conditional"),
+        r("たら", "る", RAW, V1, "conditional (tara)"),
         // ます chain
-        r("ました", "ます", ANY, MASU, "past"),
-        r("ません", "ます", ANY, MASU, "negative"),
-        r("ませんでした", "ます", ANY, MASU, "past negative"),
-        r("まして", "ます", ANY, MASU, "te-form"),
-        r("ましょう", "ます", ANY, MASU, "volitional"),
+        r("ました", "ます", RAW, MASU, "past"),
+        r("ません", "ます", RAW, MASU, "negative"),
+        r("ませんでした", "ます", RAW, MASU, "past negative"),
+        r("まして", "ます", RAW, MASU, "te-form"),
+        r("ましょう", "ます", RAW, MASU, "volitional"),
         // ている / てる
         r("いる", "", V1, TE, "progressive"),
         r("てる", "て", V1, TE, "progressive"),
@@ -75,57 +78,57 @@ fn rules() -> Vec<Rule> {
         r("ちゃう", "て", V5, TE, "completion"),
         r("じゃう", "で", V5, TE, "completion"),
         // 形容詞
-        r("かった", "い", ANY, ADJI, "past"),
+        r("かった", "い", RAW, ADJI, "past"),
         r("くない", "い", ADJI, ADJI, "negative"),
-        r("くて", "い", ANY | TE, ADJI, "te-form"),
-        r("く", "い", ANY, ADJI, "adverbial"),
-        r("ければ", "い", ANY, ADJI, "conditional"),
-        r("かったら", "い", ANY, ADJI, "conditional (tara)"),
-        r("さ", "い", ANY, ADJI, "noun (sa)"),
-        r("そう", "い", ANY, ADJI, "seemingness"),
+        r("くて", "い", RAW | TE, ADJI, "te-form"),
+        r("く", "い", RAW, ADJI, "adverbial"),
+        r("ければ", "い", RAW, ADJI, "conditional"),
+        r("かったら", "い", RAW, ADJI, "conditional (tara)"),
+        r("さ", "い", RAW, ADJI, "noun (sa)"),
+        r("そう", "い", RAW, ADJI, "seemingness"),
         // する
-        r("した", "する", ANY, VS, "past"),
-        r("して", "する", ANY | TE, VS, "te-form"),
+        r("した", "する", RAW, VS, "past"),
+        r("して", "する", RAW | TE, VS, "te-form"),
         r("しない", "する", ADJI, VS, "negative"),
         r("します", "する", MASU, VS, "polite"),
         r("される", "する", V1, VS, "passive"),
         r("させる", "する", V1, VS, "causative"),
         r("できる", "する", V1, VS, "potential"),
-        r("しよう", "する", ANY, VS, "volitional"),
-        r("しろ", "する", ANY, VS, "imperative"),
-        r("せず", "する", ANY, VS, "negative (zu)"),
-        r("すれば", "する", ANY, VS, "conditional"),
+        r("しよう", "する", RAW, VS, "volitional"),
+        r("しろ", "する", RAW, VS, "imperative"),
+        r("せず", "する", RAW, VS, "negative (zu)"),
+        r("すれば", "する", RAW, VS, "conditional"),
         r("したい", "する", ADJI, VS, "desire"),
         r("する", "", VS, VS, "suru verb"),
         // 来る
-        r("きた", "くる", ANY, VK, "past"),
-        r("きて", "くる", ANY | TE, VK, "te-form"),
+        r("きた", "くる", RAW, VK, "past"),
+        r("きて", "くる", RAW | TE, VK, "te-form"),
         r("こない", "くる", ADJI, VK, "negative"),
         r("きます", "くる", MASU, VK, "polite"),
-        r("こよう", "くる", ANY, VK, "volitional"),
-        r("こい", "くる", ANY, VK, "imperative"),
-        r("来た", "来る", ANY, VK, "past"),
-        r("来て", "来る", ANY | TE, VK, "te-form"),
+        r("こよう", "くる", RAW, VK, "volitional"),
+        r("こい", "くる", RAW, VK, "imperative"),
+        r("来た", "来る", RAW, VK, "past"),
+        r("来て", "来る", RAW | TE, VK, "te-form"),
         r("来ない", "来る", ADJI, VK, "negative"),
         r("来ます", "来る", MASU, VK, "polite"),
         // 行く is irregular in the て/た forms
-        r("いって", "いく", ANY | TE, V5, "te-form"),
-        r("いった", "いく", ANY, V5, "past"),
-        r("行って", "行く", ANY | TE, V5, "te-form"),
-        r("行った", "行く", ANY, V5, "past"),
+        r("いって", "いく", RAW | TE, V5, "te-form"),
+        r("いった", "いく", RAW, V5, "past"),
+        r("行って", "行く", RAW | TE, V5, "te-form"),
+        r("行った", "行く", RAW, V5, "past"),
     ];
     for &(u, i, a, e, o, te, ta) in GODAN {
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
         v.push(r(leak(format!("{a}ない")), u, ADJI, V5, "negative"));
-        v.push(r(leak(format!("{a}ず")), u, ANY, V5, "negative (zu)"));
+        v.push(r(leak(format!("{a}ず")), u, RAW, V5, "negative (zu)"));
         v.push(r(leak(format!("{i}ます")), u, MASU, V5, "polite"));
         v.push(r(leak(format!("{i}たい")), u, ADJI, V5, "desire"));
-        v.push(r(te, u, ANY | TE, V5, "te-form"));
-        v.push(r(ta, u, ANY, V5, "past"));
-        v.push(r(leak(format!("{ta}ら")), u, ANY, V5, "conditional (tara)"));
-        v.push(r(leak(format!("{e}ば")), u, ANY, V5, "conditional"));
-        v.push(r(e, u, ANY, V5, "imperative"));
-        v.push(r(leak(format!("{o}う")), u, ANY, V5, "volitional"));
+        v.push(r(te, u, RAW | TE, V5, "te-form"));
+        v.push(r(ta, u, RAW, V5, "past"));
+        v.push(r(leak(format!("{ta}ら")), u, RAW, V5, "conditional (tara)"));
+        v.push(r(leak(format!("{e}ば")), u, RAW, V5, "conditional"));
+        v.push(r(e, u, RAW, V5, "imperative"));
+        v.push(r(leak(format!("{o}う")), u, RAW, V5, "volitional"));
         v.push(r(leak(format!("{a}れる")), u, V1, V5, "passive"));
         v.push(r(leak(format!("{a}せる")), u, V1, V5, "causative"));
         v.push(r(leak(format!("{e}る")), u, V1, V5, "potential"));
@@ -216,6 +219,17 @@ mod tests {
         assert!(has("勉強した", "勉強"));
         assert!(has("来なかった", "来る"));
         assert!(has("話せる", "話す"));
+    }
+
+    #[test]
+    fn does_not_chain_endings_onto_derived_forms() {
+        let c = deinflect("かける");
+        assert!(c.iter().any(|c| c.term == "かく"));
+        assert!(!c.iter().any(|c| c.term == "かい"), "{c:?}");
+        let c = deinflect("食べなかった");
+        assert!(c.iter().any(|c| c.term == "食べる"), "{c:?}");
+        let c = deinflect("読んでいた");
+        assert!(c.iter().any(|c| c.term == "読む"), "{c:?}");
     }
 
     #[test]

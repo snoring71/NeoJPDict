@@ -57,6 +57,7 @@ CREATE INDEX IF NOT EXISTS terms_expr_rev    ON terms(expr_rev);
 CREATE INDEX IF NOT EXISTS terms_reading_rev ON terms(reading_rev);
 CREATE INDEX IF NOT EXISTS terms_browse  ON terms(dict_id, sort_key, id);
 CREATE INDEX IF NOT EXISTS terms_locator ON terms(dict_id, locator) WHERE locator != '';
+CREATE INDEX IF NOT EXISTS terms_rules ON terms(dict_id) WHERE rules != '';
 
 CREATE TABLE IF NOT EXISTS term_meta (
     dict_id    INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE,
@@ -531,6 +532,10 @@ impl Library {
             ),
         };
         let rows = self.query_terms(sql_cond, &arg, &id_list, q.limit)?;
+        // A dictionary that has the query itself as a headword doesn't also get guesses
+        // from conjugation (かける should not list かく as "potential" under it).
+        let exact_dicts: std::collections::HashSet<i64> =
+            rows.iter().filter(|r| r.4 == key || r.5 == key).map(|r| r.1).collect();
         push(rows, 0, None, &mut hits);
 
         if q.deinflect && matches!(q.mode, MatchMode::Exact | MatchMode::Prefix) {
@@ -538,10 +543,13 @@ impl Library {
                 if cand.term == key {
                     continue;
                 }
-                let rows = self.query_terms("(expr_key = ?1 OR reading_key = ?1)", &cand.term, &id_list, q.limit)?;
+                // Fetch generously: かく has dozens of noun homographs ahead of 書く, and the
+                // word-class filter below runs after the SQL limit.
+                let rows = self.query_terms("(expr_key = ?1 OR reading_key = ?1)", &cand.term, &id_list, q.limit.max(500))?;
                 let rows: Vec<_> = rows
                     .into_iter()
-                    .filter(|row| crate::deinflect::rules_match(cand.required_rule, &self.term_rules(row.0)))
+                    .filter(|row| !exact_dicts.contains(&row.1))
+                    .filter(|row| self.can_inflect(row, &cand))
                     .collect();
                 push(rows, 1, Some(cand.reasons.join(" · ")), &mut hits);
             }
@@ -552,6 +560,32 @@ impl Library {
             enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
         hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
         Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect())
+    }
+
+    /// Could this term be the base form that `cand` was deinflected to?
+    fn can_inflect(&self, row: &(i64, i64, String, String, String, String, i64), cand: &crate::deinflect::Candidate) -> bool {
+        let rules = self.term_rules(row.0);
+        if !rules.trim().is_empty() {
+            return crate::deinflect::rules_match(cand.required_rule, &rules);
+        }
+        if self.dict_has_rules(row.1) {
+            // The dictionary marks its verbs and adjectives, so an unmarked term is neither.
+            return false;
+        }
+        // No word classes at all (EPWING): a spelled form must end in the same kana as
+        // the base form, so 書く fits かく but 角 does not.
+        let expr = &row.2;
+        if expr.chars().all(crate::kana::is_kana) {
+            return true;
+        }
+        let last = |s: &str| s.chars().last().map(|c| crate::kana::to_hiragana(&c.to_string()));
+        last(expr).is_some() && last(expr) == last(&cand.term)
+    }
+
+    fn dict_has_rules(&self, dict_id: i64) -> bool {
+        self.conn
+            .query_row("SELECT EXISTS(SELECT 1 FROM terms WHERE dict_id=?1 AND rules != '')", [dict_id], |r| r.get(0))
+            .unwrap_or(false)
     }
 
     fn term_rules(&self, term_id: i64) -> String {

@@ -302,7 +302,22 @@ pub fn split_heading(h: &str) -> (String, Vec<String>) {
             let inner = &h[a + '【'.len_utf8()..b];
             let mut forms: Vec<String> = vec![];
             let mut alts: Vec<String> = vec![];
-            for part in inner.split(['・', '･', '／']) {
+            // Split on ・ only outside brackets: 掛ける（懸ける・架ける）is one part.
+            let mut parts: Vec<String> = vec![String::new()];
+            let mut depth = 0i32;
+            for c in inner.chars() {
+                match c {
+                    '（' | '(' | '〈' => depth += 1,
+                    '）' | ')' | '〉' => depth -= 1,
+                    _ => {}
+                }
+                if depth <= 0 && matches!(c, '・' | '･' | '／') {
+                    parts.push(String::new());
+                } else {
+                    parts.last_mut().unwrap().push(c);
+                }
+            }
+            for part in &parts {
                 let mut main = String::new();
                 let mut chars = part.chars().filter(|c| !marks(c)).peekable();
                 while let Some(c) = chars.next() {
@@ -328,6 +343,9 @@ pub fn split_heading(h: &str) -> (String, Vec<String>) {
                 }
             }
             forms.extend(alts);
+            // A kana-only fragment that is just the end of the reading is what's left of a
+            // spelling whose kanji is a gaiji without a Unicode mapping (▼繫ける → ける).
+            forms.retain(|f| !(f.chars().all(crate::kana::is_kana) && f != &reading && reading.ends_with(f.as_str())));
             forms.dedup();
             if forms.is_empty() {
                 forms.push(reading.clone());
@@ -478,6 +496,14 @@ mod tests {
         assert_eq!(split_heading("あ・う【会う・合う】"), ("あう".into(), vec!["会う".into(), "合う".into()]));
         assert_eq!(split_heading("べん‐り【便利】"), ("べんり".into(), vec!["便利".into()]));
         assert_eq!(split_heading("あ"), ("あ".into(), vec!["あ".into()]));
+        assert_eq!(
+            split_heading("か・ける【掛ける（懸ける・架ける・▼ける）】"),
+            ("かける".into(), vec!["掛ける".into(), "懸ける".into(), "架ける".into()])
+        );
+        assert_eq!(
+            split_heading("おさえ‐つ・ける【押さえつける・抑えつける（押さえ付ける・抑え付ける）】"),
+            ("おさえつける".into(), vec!["押さえつける".into(), "抑えつける".into(), "押さえ付ける".into(), "抑え付ける".into()])
+        );
         assert_eq!(split_heading("〔小さい〕"), ("".into(), vec!["〔小さい〕".into()]));
         assert_eq!(split_heading("あん‐ちゅう【暗中（▼闇中）】"), ("あんちゅう".into(), vec!["暗中".into(), "闇中".into()]));
         assert_eq!(split_heading("と‐る【取（り）扱（い）】").1, vec!["取り扱い".to_string()]);
