@@ -38,6 +38,8 @@ export interface SearchHit {
   expression: string;
   reading: string;
   deinflection: string | null;
+  /** Full-text and example searches: the text around the match. */
+  snippet?: string;
 }
 
 export interface TagInfo {

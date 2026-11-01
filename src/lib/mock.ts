@@ -84,7 +84,15 @@ export const mockApi = {
       })
       .sort((a, b) => (order.get(a.dictId)! - order.get(b.dictId)!) || a.reading.length - b.reading.length)
       .slice(0, query.limit)
-      .map(toHit);
+      .map((e) => {
+        const hit = toHit(e);
+        if (query.mode === "fullText" || query.mode === "example") {
+          const text = e.html.replace(/<rt>.*?<\/rt>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+          const at = key(text).indexOf(q);
+          if (at >= 0) hit.snippet = (at > 16 ? "…" : "") + text.slice(Math.max(0, at - 16), at + q.length + 40) + "…";
+        }
+        return hit;
+      });
   },
   async get_entry({ termId, record }: any): Promise<EntryView> {
     const d = await data();

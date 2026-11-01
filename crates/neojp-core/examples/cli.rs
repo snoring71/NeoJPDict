@@ -37,7 +37,7 @@ fn main() -> neojp_core::Result<()> {
             let hits = lib.search_with(&SearchQuery { text: args[3].clone(), mode, limit: 20, deinflect: true, ..Default::default() }, Some(&store))?;
             eprintln!("{} hits in {:.1?}", hits.len(), t.elapsed());
             for h in &hits {
-                println!("[{}] {} 【{}】 {:?}", h.dict_id, h.reading, h.expression, h.deinflection);
+                println!("[{}] {} 【{}】 {:?} {}", h.dict_id, h.reading, h.expression, h.deinflection, h.snippet.as_deref().unwrap_or(""));
             }
             if let Some(h) = hits.first() {
                 let store = epwing::EpwingStore::default();

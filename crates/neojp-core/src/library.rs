@@ -226,6 +226,9 @@ pub struct SearchHit {
     pub reading: String,
     /// Set when the hit came from deinflecting the query, e.g. "past · negative".
     pub deinflection: Option<String>,
+    /// For full-text and example searches: the text around the match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -628,7 +631,7 @@ impl Library {
                 let exactness = if ek == key { 0 } else if rk == key { 1 } else { 2 };
                 let len = ek.chars().count().min(rk.chars().count().max(1)) as i64;
                 hits.push((
-                    SearchHit { term_id, dict_id, expression, reading, deinflection: reason.clone() },
+                    SearchHit { term_id, dict_id, expression, reading, deinflection: reason.clone(), snippet: None },
                     rank * 1_000_000 + exactness * 10_000 + len,
                 ));
             }
@@ -646,10 +649,17 @@ impl Library {
             let rows = st
                 .query_map([&expr], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let dicts: std::collections::HashMap<i64, &DictionaryInfo> = enabled.iter().map(|d| (d.id, d)).collect();
+            let mut quotes = std::collections::HashMap::new();
             let rows = if q.mode == MatchMode::Example {
-                let dicts: std::collections::HashMap<i64, &DictionaryInfo> = enabled.iter().map(|d| (d.id, d)).collect();
                 rows.into_iter()
-                    .filter(|row| self.has_example(row.0, dicts[&row.1], &key, external))
+                    .filter(|row| match self.example_quote(row.0, dicts[&row.1], &key, external) {
+                        Some(quote) => {
+                            quotes.insert(row.0, quote);
+                            true
+                        }
+                        None => false,
+                    })
                     .collect()
             } else {
                 rows
@@ -658,7 +668,17 @@ impl Library {
             let order: std::collections::HashMap<i64, usize> =
                 enabled.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
             hits.sort_by_key(|(h, rank)| (order.get(&h.dict_id).copied().unwrap_or(usize::MAX), *rank, h.term_id));
-            return Ok(hits.into_iter().take(q.limit).map(|(h, _)| h).collect());
+            let mut out: Vec<SearchHit> = hits.into_iter().take(q.limit).map(|(h, _)| h).collect();
+            for (i, h) in out.iter_mut().enumerate() {
+                h.snippet = if q.mode == MatchMode::Example {
+                    quotes.remove(&h.term_id)
+                } else if i < 150 {
+                    self.fulltext_snippet(h.term_id, dicts[&h.dict_id], q.text.trim(), external)
+                } else {
+                    None
+                };
+            }
+            return Ok(out);
         }
 
         // Wildcards: * for any run of characters, ? for exactly one.
@@ -801,23 +821,21 @@ impl Library {
 
     /// Does the entry have an example (text in 「」 or『』) containing `key`? A dash standing
     /// for the headword (「━を引く」) counts as the headword.
-    fn has_example(&self, term_id: i64, dict: &DictionaryInfo, key: &str, external: Option<&dyn ExternalBodies>) -> bool {
-        let Ok((expression, reading, body, locator)) = self.conn.query_row(
-            "SELECT expression, reading, body, locator FROM terms WHERE id=?1",
-            [term_id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
-        ) else {
-            return false;
-        };
-        let html = if body.is_empty() && !locator.is_empty() {
-            match external.map(|e| e.body(dict, &locator)) {
-                Some(Ok(h)) => h,
-                _ => return false,
-            }
-        } else {
-            body
-        };
-        let text = crate::fulltext::html_text(&html);
+    /// Headword, reading and visible text of an entry.
+    fn entry_text(&self, term_id: i64, dict: &DictionaryInfo, external: Option<&dyn ExternalBodies>) -> Option<(String, String, String)> {
+        let (expression, reading, body, locator) = self
+            .conn
+            .query_row("SELECT expression, reading, body, locator FROM terms WHERE id=?1", [term_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            })
+            .ok()?;
+        let html = if body.is_empty() && !locator.is_empty() { external?.body(dict, &locator).ok()? } else { body };
+        Some((expression, reading, crate::fulltext::html_text(&html)))
+    }
+
+    /// The first example (a 「」 or 『』 quote, with ━ standing for the headword) containing `key`.
+    fn example_quote(&self, term_id: i64, dict: &DictionaryInfo, key: &str, external: Option<&dyn ExternalBodies>) -> Option<String> {
+        let (expression, reading, text) = self.entry_text(term_id, dict, external)?;
         let mut rest = text.as_str();
         while let Some(open) = rest.find(['「', '『']) {
             let after = &rest[open + 3..];
@@ -826,12 +844,18 @@ impl Library {
             for stand_in in [expression.as_str(), reading.as_str()] {
                 let filled = quote.replace(['━', '─', '―', '—', '〜', '～'], stand_in);
                 if kana::search_key(&filled).contains(key) {
-                    return true;
+                    return Some(format!("「{filled}」"));
                 }
             }
             rest = &after[close.min(after.len())..];
         }
-        false
+        None
+    }
+
+    /// The text around the first occurrence of `query` in an entry, for a full-text hit.
+    fn fulltext_snippet(&self, term_id: i64, dict: &DictionaryInfo, query: &str, external: Option<&dyn ExternalBodies>) -> Option<String> {
+        let (_, _, text) = self.entry_text(term_id, dict, external)?;
+        snippet_around(&text, query, 16, 40)
     }
 
     /// Could this term be the base form that `cand` was deinflected to?
@@ -1059,6 +1083,7 @@ impl Library {
                         expression: r.get(2)?,
                         reading: r.get(3)?,
                         deinflection: None,
+                        snippet: None,
                     })
                 })
                 .optional()?)
@@ -1090,6 +1115,7 @@ impl Library {
                 expression: r.get(2)?,
                 reading: r.get(3)?,
                 deinflection: None,
+                snippet: None,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -1239,4 +1265,31 @@ mod tests {
         lib.update_dictionary_display(id, "", "").unwrap();
         assert_eq!(lib.dictionary(id).unwrap().title, "大辞林 第四版");
     }
+}
+
+/// Up to `before` characters before and `after` after the first match of `query` in `text`
+/// (kana-, width- and case-insensitive), on one line, with … where text was cut.
+pub(crate) fn snippet_around(text: &str, query: &str, before: usize, after: usize) -> Option<String> {
+    let fold = |c: char| -> char {
+        let s = kana::to_hiragana(&kana::fold_width(&c.to_string())).to_lowercase();
+        s.chars().next().unwrap_or(c)
+    };
+    let chars: Vec<char> = text.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).collect();
+    let folded: Vec<char> = chars.iter().map(|&c| fold(c)).collect();
+    let want: Vec<char> = query.chars().filter(|c| !c.is_whitespace()).map(fold).collect();
+    if want.is_empty() {
+        return None;
+    }
+    let at = folded.windows(want.len()).position(|w| w == want.as_slice())?;
+    let from = at.saturating_sub(before);
+    let to = (at + want.len() + after).min(chars.len());
+    let mut s: String = chars[from..to].iter().collect();
+    s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if from > 0 {
+        s.insert(0, '…');
+    }
+    if to < chars.len() {
+        s.push('…');
+    }
+    Some(s)
 }

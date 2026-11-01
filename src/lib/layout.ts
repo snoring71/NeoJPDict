@@ -224,3 +224,19 @@ export function markText(root: HTMLElement, needle: string, cls: string, attrs: 
   }
   return firsts.filter((m): m is HTMLElement => !!m);
 }
+
+/** Split `text` into runs, flagging those that match `needle` (kana- and width-insensitive). */
+export function splitMatches(text: string, needle: string): { text: string; hit: boolean }[] {
+  const want = foldText(needle.replace(/\s+/g, ""));
+  const folded = foldText(text);
+  if (!want || folded.length !== text.length) return [{ text, hit: false }];
+  const out: { text: string; hit: boolean }[] = [];
+  let i = 0;
+  for (let at = folded.indexOf(want); at >= 0; at = folded.indexOf(want, at + want.length)) {
+    if (at > i) out.push({ text: text.slice(i, at), hit: false });
+    out.push({ text: text.slice(at, at + want.length), hit: true });
+    i = at + want.length;
+  }
+  if (i < text.length) out.push({ text: text.slice(i), hit: false });
+  return out;
+}

@@ -3,6 +3,7 @@
   import { t } from "../lib/i18n";
   import type { SearchHit } from "../lib/types";
   import DictBadge from "./DictBadge.svelte";
+  import { splitMatches } from "../lib/layout";
 
   let { hits, grouped = true, onpick }: { hits: SearchHit[]; grouped?: boolean; onpick: (h: SearchHit) => void } = $props();
 
@@ -59,7 +60,12 @@
           aria-selected={app.selected?.termId === h.termId}
           onclick={() => onpick(h)}>
           {#if !grouped}<DictBadge title={d?.title ?? "?"} size={18} />{/if}
-          <span class="hw"><span class="main">{l.main}</span><span class="sub">{l.sub}</span></span>
+          <span class="hw">
+            <span class="main">{l.main}</span><span class="sub">{l.sub}</span>
+            {#if h.snippet}
+              <span class="snippet">{#each splitMatches(h.snippet, app.query) as part}{#if part.hit}<b>{part.text}</b>{:else}{part.text}{/if}{/each}</span>
+            {/if}
+          </span>
           {#if h.deinflection}<span class="deinf" title={t("conjugation", { r: h.deinflection })}>活</span>{/if}
         </button>
       {/each}
@@ -129,6 +135,28 @@
     min-width: 0;
     font-family: var(--font-ui-jp);
     overflow-wrap: anywhere;
+  }
+  .snippet {
+    margin-top: 2px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-2);
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .snippet b {
+    font-weight: 600;
+    color: var(--accent-text);
+    background: rgb(255 214 10 / 0.3);
+    border-radius: 2px;
+  }
+  .hit.selected .snippet,
+  .hit.selected .snippet b {
+    color: var(--on-accent);
+    background: transparent;
   }
   .main {
     font-weight: 500;

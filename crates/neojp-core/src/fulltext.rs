@@ -115,9 +115,11 @@ pub fn match_expr(query: &str) -> Option<String> {
 pub fn html_text(html: &str) -> String {
     let mut out = String::with_capacity(html.len() / 2);
     let mut skip: Option<&str> = None;
+    // The next text run is a raised reading such as 椅子<sup>(いす)</sup>: imitation ruby.
+    let mut skip_text = false;
     let mut rest = html;
     while let Some(lt) = rest.find('<') {
-        if skip.is_none() {
+        if skip.is_none() && !std::mem::take(&mut skip_text) {
             push_decoded(&mut out, &rest[..lt]);
         }
         let after = &rest[lt + 1..];
@@ -126,6 +128,11 @@ pub fn html_text(html: &str) -> String {
         let name: String = tag.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
         let name = name.to_ascii_lowercase();
         let closing = tag.starts_with('/');
+        if !closing && skip.is_none() && (name == "sup" || tag.contains("vertical-align:super")) {
+            let after_tag = &after[end.min(after.len())..];
+            let text = &after_tag[..after_tag.find('<').unwrap_or(after_tag.len())];
+            skip_text = is_raised_reading(text);
+        }
         match skip {
             Some(s) if closing && name == s => skip = None,
             None if !closing && (name == "rt" || name == "rp" || name == "svg" || name == "style") => {
@@ -147,6 +154,15 @@ pub fn html_text(html: &str) -> String {
     out
 }
 
+/// "(いす)" or "（じょう）": a reading in brackets.
+fn is_raised_reading(text: &str) -> bool {
+    let t = text.trim();
+    let inner = t
+        .strip_prefix(['(', '（'])
+        .and_then(|x| x.strip_suffix([')', '）']));
+    matches!(inner, Some(k) if !k.is_empty() && k.chars().all(|c| kana::is_kana(c) || c == 'ー' || c == '・'))
+}
+
 fn push_decoded(out: &mut String, s: &str) {
     if !s.contains('&') {
         out.push_str(s);
@@ -165,7 +181,7 @@ fn push_decoded(out: &mut String, s: &str) {
 impl Library {
     /// Dictionaries whose bodies are in the full-text index.
     pub fn fulltext_ready(&self) -> Result<Vec<i64>> {
-        let mut st = self.conn.prepare("SELECT dict_id FROM fts_dicts WHERE state='done'")?;
+        let mut st = self.conn.prepare("SELECT dict_id FROM fts_dicts WHERE state='v2'")?;
         let ids = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
         Ok(ids)
     }
@@ -173,7 +189,7 @@ impl Library {
     /// Dictionaries that still need indexing.
     pub fn fulltext_pending(&self) -> Result<Vec<i64>> {
         let mut st = self.conn.prepare(
-            "SELECT id FROM dictionaries WHERE id NOT IN (SELECT dict_id FROM fts_dicts WHERE state='done')
+            "SELECT id FROM dictionaries WHERE id NOT IN (SELECT dict_id FROM fts_dicts WHERE state='v2')
              AND term_count > 0 ORDER BY sort_order, id",
         )?;
         let ids = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<Vec<i64>, _>>()?;
@@ -230,7 +246,7 @@ impl Library {
             }
         }
         self.conn.execute(
-            "INSERT OR REPLACE INTO fts_dicts(dict_id, state) VALUES (?1, 'done')",
+            "INSERT OR REPLACE INTO fts_dicts(dict_id, state) VALUES (?1, 'v2')",
             [dict.id],
         )?;
         Ok(true)
@@ -254,6 +270,11 @@ mod tests {
     #[test]
     fn visible_text() {
         assert_eq!(html_text("<ruby>錠<rt>じょう</rt></ruby>を<b>a&amp;b</b>"), "錠をa&b");
+        assert_eq!(
+            html_text("「椅子<span style=\"font-size:65%;vertical-align:super;\">(いす)</span>に腰を━」"),
+            "「椅子に腰を━」"
+        );
+        assert_eq!(html_text("x<sup>(2)</sup>"), "x(2)");
     }
 
     #[test]
