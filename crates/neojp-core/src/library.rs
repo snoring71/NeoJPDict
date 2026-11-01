@@ -1179,6 +1179,13 @@ impl Library {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Distinct entry positions of a dictionary (developer aid).
+    pub fn locators(&self, dict_id: i64) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT DISTINCT locator FROM terms WHERE dict_id=?1 AND locator != ''")?;
+        let rows = st.query_map([dict_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn remove_marker(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM markers WHERE id=?1", [id])?;
         Ok(())

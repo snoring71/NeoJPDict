@@ -177,6 +177,11 @@
     const a = (e.target as HTMLElement).closest("a");
     if (!a) return;
     e.preventDefault();
+    const sound = a.getAttribute("data-sound");
+    if (sound) {
+      new Audio(sound).play().catch(() => {});
+      return;
+    }
     const q = a.getAttribute("data-query");
     if (q) app.searchFor(q);
     const ep = a.getAttribute("data-ep");
@@ -773,6 +778,24 @@
   }
   .vertical .entry-body :global(.ep-gaiji) {
     vertical-align: baseline;
+  }
+  .entry-body :global(.ep-sound) {
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .entry-body :global(.ep-sound-icon) {
+    font-size: 0.8em;
+    margin-inline: 0.1em;
+  }
+  /* Monochrome figures are black ink on clear: invert them on dark paper. */
+  :global(:root[data-theme="dark"]) .entry-body :global(.ep-mono),
+  :global(:root[data-paper="black"]) .entry-body :global(.ep-mono) {
+    filter: invert(1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]:not([data-paper="white"]):not([data-paper="cream"])) .entry-body :global(.ep-mono) {
+      filter: invert(1);
+    }
   }
   .entry-body :global(.ep-img.inline) {
     height: 1em;

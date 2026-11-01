@@ -115,6 +115,8 @@ struct IndexInfo {
 pub struct Subbook {
     pub info: SubbookInfo,
     text: Zio,
+    /// Separate sound file (HONMONS), when the book has one.
+    sound: Option<Zio>,
     indexes: Vec<IndexInfo>,
     pub gaiji: Gaiji,
     /// Sorted byte offsets of every indexed entry, used to find where an entry ends.
@@ -131,6 +133,7 @@ impl Subbook {
             .find_map(|n| find_ci(&data, n))
             .ok_or_else(|| Error::Format(format!("HONMON not found in {}", data.display())))?;
         let text = Zio::open(&honmon)?;
+        let sound = ["honmons", "honmons.ebz"].iter().find_map(|n| find_ci(&data, n)).and_then(|p| Zio::open(&p).ok());
 
         let index_page = text.read_page(1)?;
         let n = index_page[1] as usize;
@@ -152,7 +155,7 @@ impl Subbook {
             narrow: load(&info.narrow_fonts),
             map: GaijiMap::find(root, &sub, &info.directory),
         };
-        Ok(Subbook { info: info.clone(), text, indexes, gaiji, starts: OnceLock::new() })
+        Ok(Subbook { info: info.clone(), text, sound, indexes, gaiji, starts: OnceLock::new() })
     }
 
     /// Fixed pages a book may carry: its menu (0x01), copyright notice (0x02) and
@@ -230,6 +233,72 @@ impl Subbook {
             }
             len = (len * 4).min(limit);
         }
+    }
+
+    /// A monochrome graphic (1 bit per pixel, rows top to bottom) as SVG.
+    pub fn mono_graphic(&self, page: u32, offset: u32, width: u32, height: u32) -> Result<Option<Vec<u8>>> {
+        if width == 0 || height == 0 || width > 4096 || height > 4096 {
+            return Ok(None);
+        }
+        let pos = (page.max(1) as u64 - 1) * zio::PAGE + offset as u64;
+        let stride = width.div_ceil(8) as usize;
+        let bits = self.text.read_at(pos, stride * height as usize)?;
+        let mut d = String::new();
+        for y in 0..height as usize {
+            let row = &bits[y * stride..(y + 1) * stride];
+            let on = |x: usize| row[x / 8] & (0x80 >> (x % 8)) != 0;
+            let mut x = 0;
+            while x < width as usize {
+                if on(x) {
+                    let s = x;
+                    while x < width as usize && on(x) {
+                        x += 1;
+                    }
+                    d.push_str(&format!("M{s} {y}h{}v1h-{}z", x - s, x - s));
+                } else {
+                    x += 1;
+                }
+            }
+        }
+        Ok(Some(
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width} {height}\" width=\"{width}\" height=\"{height}\" shape-rendering=\"crispEdges\"><path d=\"{d}\" fill=\"#000\"/></svg>"
+            )
+            .into_bytes(),
+        ))
+    }
+
+    /// A WAVE sound between two positions, with a RIFF header added.
+    pub fn wave(&self, start: (u32, u32), end: (u32, u32)) -> Result<Option<Vec<u8>>> {
+        let at = |(p, o): (u32, u32)| (p.max(1) as u64 - 1) * zio::PAGE + o as u64;
+        let (from, to) = (at(start), at(end));
+        if to <= from || to - from > 64 * 1024 * 1024 {
+            return Ok(None);
+        }
+        let file = self.sound.as_ref().unwrap_or(&self.text);
+        let body = file.read_at(from, (to - from + 1) as usize)?;
+        let mut out = Vec::with_capacity(body.len() + 44);
+        out.extend_from_slice(b"RIFF");
+        if body.starts_with(b"fmt ") {
+            // The book stores its own format chunk followed by the data chunk.
+            out.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
+            out.extend_from_slice(b"WAVE");
+        } else {
+            // Bare samples: 16-bit mono PCM at 44.1 kHz, as EB assumes.
+            out.extend_from_slice(&(body.len() as u32 + 36).to_le_bytes());
+            out.extend_from_slice(b"WAVEfmt ");
+            out.extend_from_slice(&16u32.to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.extend_from_slice(&44100u32.to_le_bytes());
+            out.extend_from_slice(&88200u32.to_le_bytes());
+            out.extend_from_slice(&2u16.to_le_bytes());
+            out.extend_from_slice(&16u16.to_le_bytes());
+            out.extend_from_slice(b"data");
+            out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        }
+        out.extend_from_slice(&body);
+        Ok(Some(out))
     }
 
     /// A colour graphic (`data` + little-endian size + JPEG/BMP bytes) at a BCD position.
@@ -501,6 +570,18 @@ impl ExternalBodies for EpwingStore {
             (Some("cg"), Some(p), Some(o)) => {
                 let (Ok(p), Ok(o)) = (p.parse(), o.parse()) else { return Ok(None) };
                 self.subbook(dict)?.color_graphic(p, o)
+            }
+            (Some("mono"), Some(p), Some(o)) => {
+                let w = parts.next().and_then(|x| x.parse().ok());
+                let h = parts.next().and_then(|x| x.trim_end_matches(".svg").parse().ok());
+                let (Ok(p), Ok(o), Some(w), Some(h)) = (p.parse(), o.parse(), w, h) else { return Ok(None) };
+                self.subbook(dict)?.mono_graphic(p, o, w, h)
+            }
+            (Some("wav"), Some(sp), Some(so)) => {
+                let ep = parts.next().and_then(|x| x.parse().ok());
+                let eo = parts.next().and_then(|x| x.trim_end_matches(".wav").parse().ok());
+                let (Ok(sp), Ok(so), Some(ep), Some(eo)) = (sp.parse(), so.parse(), ep, eo) else { return Ok(None) };
+                self.subbook(dict)?.wave((sp, so), (ep, eo))
             }
             _ => Ok(None),
         }
