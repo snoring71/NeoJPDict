@@ -504,6 +504,7 @@
       style:--entry-size="{settings.fontSize}px"
       style:font-family={entryFont}
       style:font-weight={settings.fontWeight}
+      style:--entry-tracking="{settings.letterSpacing}em"
       bind:this={scroller}
       onwheel={wheel}
       onclick={click}
@@ -720,6 +721,7 @@
     padding: 28px 36px;
     font-family: var(--font-mincho);
     font-size: var(--entry-size);
+    letter-spacing: var(--entry-tracking, 0);
     line-height: 1.75;
     color: var(--paper-text, var(--text-1));
   }
@@ -1062,6 +1064,8 @@
     vertical-align: baseline !important;
   }
   .entry-body :global(.nj-upright) {
+    /* 縦中横 runs fill one column: extra tracking would spread them past it. */
+    letter-spacing: 0;
     display: inline-block;
     writing-mode: horizontal-tb;
     white-space: nowrap;
@@ -1075,6 +1079,7 @@
   }
   .entry-body :global(ruby rt) {
     font-size: 0.5em;
+    letter-spacing: 0;
   }
   .entry-body :global(table) {
     border-collapse: collapse;

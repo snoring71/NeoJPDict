@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { settings, saveSettings } from "../lib/settings.svelte";
+  import { settings, saveSettings, LETTER_SPACINGS, SPACING_LABELS } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
   import { api, pickBackupPath, setGlobalShortcut } from "../lib/api";
   import { app } from "../lib/store.svelte";
@@ -114,8 +114,15 @@
       {/each}
     </select>
 
+    <label for="s-spacing">{t("letterSpacing")}</label>
+    <select id="s-spacing" bind:value={settings.letterSpacing} onchange={saveSettings}>
+      {#each LETTER_SPACINGS as sp}
+        <option value={sp}>{t(SPACING_LABELS[sp])}</option>
+      {/each}
+    </select>
+
     <span></span>
-    <p class="font-sample" lang="ja" style:font-family={fontFamily(settings.font, settings.fontWeight)} style:font-weight={settings.fontWeight}>
+    <p class="font-sample" lang="ja" style:font-family={fontFamily(settings.font, settings.fontWeight)} style:font-weight={settings.fontWeight} style:letter-spacing="{settings.letterSpacing}em">
       辞書を引く「あいうえお」ー
     </p>
 
