@@ -1060,7 +1060,8 @@
     vertical-align: middle;
   }
   /* Horizontal-text alignment hints (text-bottom…) push turned marks off the column's centre line. */
-  .entry-body :global(:has(> .nj-turn)) {
+  .entry-body :global(:has(> .nj-turn)),
+  .entry-body :global(:has(> .nj-glyph)) {
     vertical-align: baseline !important;
   }
   .entry-body :global(.nj-upright) {
