@@ -1091,8 +1091,15 @@
   .entry-body :global(.nj-badge-blue) {
     background: color-mix(in srgb, var(--link) 90%, var(--reader-bg));
   }
-  .vertical .entry-body :global(.nj-badge) {
-    vertical-align: middle;
+  /*
+   * Vertical text: inline images, masks and badges sit on the central baseline. Their
+   * horizontal-text hints (text-bottom) and "middle" depend on the font's metrics, which put
+   * them off the column's centre line by several pixels with Yu Gothic or IPA fonts.
+   */
+  .vertical .entry-body :global(.nj-badge),
+  .vertical .entry-body :global(.sc-img-inline),
+  .vertical .entry-body :global(:has(> .sc-img-inline)) {
+    vertical-align: baseline !important;
   }
   .entry-body :global(:has(> .nj-badge)) {
     vertical-align: baseline !important;
