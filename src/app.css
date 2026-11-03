@@ -10,6 +10,7 @@
   --on-accent: #ffffff;
   --link: #005fb8;
   --label-red: #c42b1c;
+  --label-green: #2e7031;
   --text-1: #1a1a1a;
   --text-2: #5d5d5d;
   --text-3: #8a8a8a;
@@ -40,6 +41,7 @@
     --on-accent: #000000;
     --link: #60cdff;
     --label-red: #ff99a4;
+    --label-green: #7fd88a;
     --text-1: #ffffff;
     --text-2: #c5c5c5;
     --text-3: #9a9a9a;
@@ -69,6 +71,7 @@
   --on-accent: #000000;
   --link: #60cdff;
   --label-red: #ff99a4;
+  --label-green: #7fd88a;
   --text-1: #ffffff;
   --text-2: #c5c5c5;
   --text-3: #9a9a9a;

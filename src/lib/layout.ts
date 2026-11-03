@@ -85,6 +85,76 @@ function textGlyphs(root: HTMLElement) {
   }
 }
 
+// 三省堂国語辞典's sense numbers: 一-fill.svg (a rounded box with the numeral knocked out), 二-bluefill.svg…
+const BADGE_NAME = /^([\p{L}\p{N}])-([a-z]*)fill$/u;
+
+/**
+ * Sense-number images become a text badge (<span class="nj-badge">一</span>) that the stylesheet
+ * draws as a rounded box in the theme's colours: crisp at any size, readable on dark paper,
+ * and the numeral can be searched and copied.
+ */
+function senseBadges(root: HTMLElement) {
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img"))) {
+    const w = emLength(img.style.width);
+    const h = emLength(img.style.height);
+    if (w == null || h == null || w < 0.8 || w > 1.2 || h < 0.8 || h > 1.2) continue;
+    const m = imageName(img).match(BADGE_NAME);
+    if (!m) continue;
+    const alt = img.getAttribute("alt") ?? "";
+    if (alt && alt !== m[1]) continue;
+    const span = document.createElement("span");
+    span.className = m[2] ? `nj-badge nj-badge-${m[2]}` : "nj-badge";
+    span.textContent = m[1];
+    img.replaceWith(span);
+  }
+}
+
+/**
+ * Yomitan's `appearance: "monochrome"` images (labels, ▽ marks, gaiji) are shapes to be painted
+ * in the text colour, so they follow the theme instead of staying black on dark paper. Like
+ * Yomitan, draw them as a mask over the current colour.
+ */
+function monochromeImages(root: HTMLElement) {
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img.sc-img-mono"))) {
+    const src = img.getAttribute("src");
+    if (!src) continue;
+    const span = document.createElement("span");
+    span.className = img.className.replace("sc-img-mono", "nj-mono");
+    const style = img.getAttribute("style");
+    if (style) span.setAttribute("style", style);
+    const url = `url("${src.replace(/["\\]/g, "\\$&")}")`;
+    span.style.setProperty("-webkit-mask-image", url);
+    span.style.setProperty("mask-image", url);
+    const alt = img.getAttribute("alt");
+    if (alt) {
+      span.setAttribute("role", "img");
+      span.setAttribute("aria-label", alt);
+      span.title = img.title || alt;
+    }
+    img.replaceWith(span);
+  }
+}
+
+/**
+ * 三省堂国語辞典 prints kanji that may also be written in kana (仮名書き可, inside the red
+ * brackets) in colour, but not the ： that marks a 熟字訓. Give that mark its own span so the
+ * stylesheet can keep it in the text colour.
+ */
+function kanaOptionalMarks(root: HTMLElement) {
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-sc-name="仮名書き可"] [data-sc-name="熟字訓"]'))) {
+    const first = el.firstChild;
+    if (!first || first.nodeType !== Node.TEXT_NODE) continue;
+    const text = first.textContent ?? "";
+    const m = text.match(/^[：:]/);
+    if (!m) continue;
+    const mark = document.createElement("span");
+    mark.className = "nj-plain";
+    mark.textContent = m[0];
+    first.textContent = text.slice(m[0].length);
+    el.insertBefore(mark, first);
+  }
+}
+
 const KANA_RUBY = /^\s*[(（]([ぁ-ゟァ-ヿー・･]+)[)）]\s*$/;
 // EPWING writes readings bare: 椅子<sup>いす</sup>.
 const BARE_RUBY = /^\s*([ぁ-ゟァ-ヿー]{1,12})\s*$/;
@@ -172,11 +242,15 @@ export function adaptHtml(html: string, vertical: boolean): string {
   root.innerHTML = html;
   logicalInline(root);
   textGlyphs(root);
+  senseBadges(root);
+  kanaOptionalMarks(root);
   realRuby(root);
   if (vertical) {
     turnImages(root);
     uprightSymbolRuns(root);
   }
+  // Last, so the passes above still see these as images.
+  monochromeImages(root);
   return root.innerHTML;
 }
 

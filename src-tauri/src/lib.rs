@@ -368,6 +368,8 @@ fn media_response(app: &AppHandle, path: &str) -> tauri::http::Response<Vec<u8>>
             tauri::http::Response::builder()
                 .header("Content-Type", mime)
                 .header("Cache-Control", "max-age=31536000, immutable")
+                // The page is on another origin, and CSS masks (monochrome images) load with CORS.
+                .header("Access-Control-Allow-Origin", "*")
                 .body(bytes)
                 .unwrap()
         }

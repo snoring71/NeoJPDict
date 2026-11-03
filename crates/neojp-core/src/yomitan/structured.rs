@@ -179,9 +179,12 @@ fn image(dict_id: i64, o: &Map<String, Value>) -> String {
         .and_then(Value::as_str)
         .unwrap_or("");
     let inline = o.get("sizeUnits").and_then(Value::as_str) == Some("em");
+    // `monochrome` images are a shape to be painted in the text colour (Yomitan draws them as a mask).
+    let mono = o.get("appearance").and_then(Value::as_str) == Some("monochrome");
     format!(
-        "<img class=\"sc-img{}\" src=\"{}\" alt=\"{}\" title=\"{}\" style=\"{}\">",
+        "<img class=\"sc-img{}{}\" src=\"{}\" alt=\"{}\" title=\"{}\" style=\"{}\">",
         if inline { " sc-img-inline" } else { "" },
+        if mono { " sc-img-mono" } else { "" },
         media_url(dict_id, path),
         escape(title),
         escape(title),
@@ -286,6 +289,21 @@ mod tests {
         assert!(html.contains("src=\"nj-media:7/meikyo2/B92D.png\""));
         assert!(!html.contains("<script"));
         assert!(html.contains("alert(1)"));
+    }
+
+    #[test]
+    fn marks_monochrome_images() {
+        let g = json!([{
+            "type": "structured-content",
+            "content": [
+                {"tag": "img", "path": "sankoku8/一-fill.svg", "width": 1.0, "height": 1.0, "sizeUnits": "em", "appearance": "monochrome", "title": "一"},
+                {"tag": "img", "path": "sankoku8/red_（.svg", "width": 1.0, "height": 1.0, "sizeUnits": "em", "appearance": "auto"}
+            ]
+        }]);
+        let html = glossary_to_html(1, &g);
+        let imgs: Vec<&str> = html.split("<img").skip(1).collect();
+        assert!(imgs[0].contains("class=\"sc-img sc-img-inline sc-img-mono\"") && imgs[0].contains("alt=\"一\""));
+        assert!(imgs[1].contains("class=\"sc-img sc-img-inline\""));
     }
 
     #[test]
