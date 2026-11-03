@@ -43,16 +43,46 @@ function turns(img: HTMLImageElement): { w: number; h: number } | null {
   const w = emLength(img.style.width);
   const h = emLength(img.style.height);
   if (w == null || h == null || h > 1.5) return null;
-  let name = img.getAttribute("src") ?? "";
-  try {
-    name = decodeURIComponent(name.split("/").pop() ?? "");
-  } catch {}
-  const stem = name.replace(/\.[a-z0-9]+$/i, "");
+  const stem = imageName(img);
   const alt = img.getAttribute("alt") ?? "";
   const markName = [...stem].some((c) => TURNING.test(c)) && !/[一-鿿]/.test(stem);
   const markAlt = alt.length > 0 && [...alt].every((c) => TURNING.test(c));
   if (markName || markAlt || w < h * 0.95) return { w, h };
   return null;
+}
+
+function imageName(img: HTMLImageElement): string {
+  let name = img.getAttribute("src") ?? "";
+  try {
+    name = decodeURIComponent(name.split("/").pop() ?? "");
+  } catch {}
+  return name.replace(/\.[a-z0-9]+$/i, "");
+}
+
+const GLYPH_NAME = /^(?:([a-z]+)_)?(.)$/u;
+const MARK = /[\p{P}\p{S}]/u;
+
+/**
+ * Inline images that just draw one punctuation mark (三省堂国語辞典's red_（.svg) become that
+ * character as text, so the entry font draws it: the same size and weight as the text around
+ * it, and in vertical text its own centred vertical glyph (︵) rather than a rotated picture.
+ * A colour prefix in the file name (red_) becomes the text colour.
+ */
+function textGlyphs(root: HTMLElement) {
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img"))) {
+    const w = emLength(img.style.width);
+    const h = emLength(img.style.height);
+    if (w == null || h == null || w < 0.8 || w > 1.2 || h < 0.8 || h > 1.2) continue;
+    const m = imageName(img).match(GLYPH_NAME);
+    if (!m || !MARK.test(m[2])) continue;
+    const span = document.createElement("span");
+    span.className = "nj-glyph";
+    const colour = m[1];
+    if (colour === "red") span.style.color = "var(--label-red, red)";
+    else if (colour && typeof CSS !== "undefined" && CSS.supports("color", colour)) span.style.color = colour;
+    span.textContent = m[2];
+    img.replaceWith(span);
+  }
 }
 
 const KANA_RUBY = /^\s*[(（]([ぁ-ゟァ-ヿー・･]+)[)）]\s*$/;
@@ -141,6 +171,7 @@ export function adaptHtml(html: string, vertical: boolean): string {
   const root = document.createElement("div");
   root.innerHTML = html;
   logicalInline(root);
+  textGlyphs(root);
   realRuby(root);
   if (vertical) {
     turnImages(root);
