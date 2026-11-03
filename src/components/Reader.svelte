@@ -1072,7 +1072,61 @@
     white-space: nowrap;
     line-height: 1;
   }
-  .entry-body :global(.nj-turn > img) {
+  /* Sense numbers (三省堂国語辞典 一 二 三): a rounded box in the text colour, the numeral in the paper colour. */
+  .entry-body :global(.nj-badge) {
+    display: inline-block;
+    inline-size: 1.25em;
+    block-size: 1.25em;
+    line-height: 1.25em;
+    font-size: 0.78em;
+    font-weight: bold;
+    text-align: center;
+    text-indent: 0;
+    letter-spacing: 0;
+    border-radius: 0.22em;
+    background: color-mix(in srgb, var(--paper-text, var(--text-1)) 78%, var(--reader-bg));
+    color: var(--reader-bg);
+    vertical-align: 0.08em;
+  }
+  .entry-body :global(.nj-badge-blue) {
+    background: color-mix(in srgb, var(--link) 90%, var(--reader-bg));
+  }
+  /*
+   * Vertical text: inline images, masks and badges sit on the central baseline. Their
+   * horizontal-text hints (text-bottom) and "middle" depend on the font's metrics, which put
+   * them off the column's centre line by several pixels with Yu Gothic or IPA fonts.
+   */
+  .vertical .entry-body :global(.nj-badge),
+  .vertical .entry-body :global(.sc-img-inline),
+  .vertical .entry-body :global(:has(> .sc-img-inline)) {
+    vertical-align: baseline !important;
+  }
+  .entry-body :global(:has(> .nj-badge)) {
+    vertical-align: baseline !important;
+  }
+  /* Monochrome images: the picture is a mask, painted in the text colour. */
+  .entry-body :global(.nj-mono) {
+    display: inline-block;
+    background-color: currentColor;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+  }
+  /* 三省堂国語辞典: kanji that may be written in kana are green, the ▽ 共通 mark red (as in the printed book). */
+  .entry-body :global([data-sc-name="仮名書き可"]) {
+    color: var(--label-green);
+  }
+  .entry-body :global([data-sc-name="仮名書き可"] :is(.nj-plain, rt)) {
+    color: var(--paper-text, var(--text-1));
+  }
+  .entry-body :global([data-sc-name="共通ロゴ"]) {
+    color: var(--label-red);
+  }
+  .entry-body :global(.nj-turn > img),
+  .entry-body :global(.nj-turn > .nj-mono) {
     position: absolute;
     left: 50%;
     top: 50%;
