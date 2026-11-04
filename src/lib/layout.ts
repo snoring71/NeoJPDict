@@ -117,7 +117,7 @@ const LABEL_NAME = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]{2
  * (<span class="nj-label">表記</span>) that the stylesheet boxes: the entry font at text size,
  * in the theme's colours, searchable, and in vertical text the characters stack top to bottom
  * on the column's centre line instead of a sideways picture. Monochrome labels are an outline
- * in the text colour; others keep their own colours, read from the picture by `labelColours`.
+ * in the text colour; others keep the picture's own colours in every theme (`labelColours`).
  * Drawings named after a word (intonation arrows such as 上昇短.svg) are not sized one em per
  * character, so they stay pictures.
  */
@@ -150,16 +150,12 @@ interface LabelLook {
 }
 const labelLooks = new Map<string, Promise<LabelLook | null>>();
 
-/** Theme colour for a colour named in a label picture: red follows the theme's red, black/white the text and paper. */
-function themeColour(c: string | null): string | null {
+/** A colour from a label picture, as the picture draws it (none for an unfilled shape). */
+function pictureColour(c: string | null): string | null {
   if (!c) return null;
   const v = c.trim().toLowerCase();
   if (v === "none" || v === "transparent") return null;
-  if (v === "black" || v === "#000" || v === "#000000" || v === "#231815") return "currentColor";
-  if (v === "white" || v === "#fff" || v === "#ffffff") return "var(--reader-bg)";
-  if (v === "red" || v === "#f00" || v === "#ff0000" || v === "#e60012") return "var(--label-red, red)";
-  if (typeof CSS !== "undefined" && CSS.supports("color", v)) return v;
-  return null;
+  return typeof CSS === "undefined" || CSS.supports("color", v) ? v : null;
 }
 
 function readLabelLook(svg: string): LabelLook | null {
@@ -168,12 +164,12 @@ function readLabelLook(svg: string): LabelLook | null {
   const text = doc.querySelector("text");
   if (!rect || !text) return null;
   const fill = rect.getAttribute("fill") ?? rect.style.fill;
-  return { box: themeColour(fill), text: themeColour(text.getAttribute("fill") ?? text.style.fill) };
+  return { box: pictureColour(fill), text: pictureColour(text.getAttribute("fill") ?? text.style.fill) };
 }
 
 /**
  * Colour labels that are not monochrome (三省堂国語辞典's red 由来 and 区別 boxes) the way their
- * picture does: a filled box when its rectangle is filled, in the theme's version of that colour.
+ * picture does, in every theme: a filled box when its rectangle is filled, in the picture's colours.
  */
 export async function labelColours(root: HTMLElement) {
   const labels = Array.from(root.querySelectorAll<HTMLElement>(".nj-label[data-src]"));
@@ -190,11 +186,11 @@ export async function labelColours(root: HTMLElement) {
       }
       const l = await look;
       if (!l) return;
-      if (l.box && l.box !== "currentColor") {
+      if (l.box) {
         el.classList.add("nj-label-fill");
         el.style.setProperty("--nj-label-box", l.box);
         if (l.text) el.style.setProperty("--nj-label-text", l.text);
-      } else if (l.text && l.text !== "currentColor") {
+      } else if (l.text) {
         el.style.color = l.text;
       }
     }),
