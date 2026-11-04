@@ -91,6 +91,7 @@
       <option value="system">{t("themeSystem")}</option>
       <option value="light">{t("themeLight")}</option>
       <option value="dark">{t("themeDark")}</option>
+      <option value="oled">{t("themeOled")}</option>
     </select>
 
     <label for="s-dir">{t("defaultWritingMode")}</label>

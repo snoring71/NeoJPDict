@@ -94,6 +94,43 @@
   color-scheme: dark;
 }
 
+:root[data-theme="oled"] {
+  /* True black for OLED screens: pure black surfaces, white text, grey pills for controls. */
+  --accent: #10405f;
+  --accent-text: #64b9ec;
+  --on-accent: #ffffff;
+  --link: #64b9ec;
+  --label-red: #f06e6a;
+  --label-green: #5ace39;
+  --text-1: #ffffff;
+  --text-2: #999999;
+  --text-3: #6e6e6e;
+  --sidebar: #000000;
+  --sidebar-solid: #000000;
+  --toolbar: #000000;
+  --reader-bg: #000000;
+  --card: #1f1f1f;
+  --flyout: #1c1c1c;
+  --field: #1f1f1f;
+  --field-focus: #262626;
+  --field-border: rgb(255 255 255 / 0.06);
+  --field-border-bottom: rgb(255 255 255 / 0.14);
+  --hover: rgb(255 255 255 / 0.07);
+  --selected: #1f1f1f;
+  --divider: #2a2a2a;
+  --divider-strong: rgb(255 255 255 / 0.22);
+  --group-head: #1f1f1f;
+  /* Sense-number badges are light grey boxes rather than near-white. */
+  --badge-strength: 80%;
+  --shadow: 0 8px 16px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+
+/* The OLED accent is a deep blue fill; draw focus rings in the brighter accent text colour. */
+:root[data-theme="oled"] :focus-visible {
+  outline-color: var(--accent-text);
+}
+
 * {
   box-sizing: border-box;
 }
