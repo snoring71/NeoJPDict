@@ -109,6 +109,98 @@ function senseBadges(root: HTMLElement) {
   }
 }
 
+const LABEL_NAME = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]{2,4}$/u;
+
+/**
+ * Boxed text labels (三省堂国語辞典's 表記.svg, 接尾.svg, 由来.svg…) are pictures of a word in a
+ * rounded box, sized one em per character (2em × 1em for 表記). They become text
+ * (<span class="nj-label">表記</span>) that the stylesheet boxes: the entry font at text size,
+ * in the theme's colours, searchable, and in vertical text the characters stack top to bottom
+ * on the column's centre line instead of a sideways picture. Monochrome labels are an outline
+ * in the text colour; others keep their own colours, read from the picture by `labelColours`.
+ * Drawings named after a word (intonation arrows such as 上昇短.svg) are not sized one em per
+ * character, so they stay pictures.
+ */
+function textLabels(root: HTMLElement) {
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img"))) {
+    const w = emLength(img.style.width);
+    const h = emLength(img.style.height);
+    if (w == null || h == null || h < 0.8 || h > 1.2) continue;
+    const name = imageName(img);
+    if (!LABEL_NAME.test(name)) continue;
+    const n = [...name].length;
+    if (Math.abs(w / h - n) > 0.1) continue;
+    const title = img.getAttribute("title") || img.getAttribute("alt") || "";
+    if (title && !title.includes(name)) continue;
+    const span = document.createElement("span");
+    span.className = "nj-label";
+    span.textContent = name;
+    if (title && title !== name) span.title = title.replace(/^[［\[]|[］\]]$/g, "");
+    if (!img.classList.contains("sc-img-mono")) {
+      const src = img.getAttribute("src");
+      if (src) span.dataset.src = src;
+    }
+    img.replaceWith(span);
+  }
+}
+
+interface LabelLook {
+  box: string | null;
+  text: string | null;
+}
+const labelLooks = new Map<string, Promise<LabelLook | null>>();
+
+/** Theme colour for a colour named in a label picture: red follows the theme's red, black/white the text and paper. */
+function themeColour(c: string | null): string | null {
+  if (!c) return null;
+  const v = c.trim().toLowerCase();
+  if (v === "none" || v === "transparent") return null;
+  if (v === "black" || v === "#000" || v === "#000000" || v === "#231815") return "currentColor";
+  if (v === "white" || v === "#fff" || v === "#ffffff") return "var(--reader-bg)";
+  if (v === "red" || v === "#f00" || v === "#ff0000" || v === "#e60012") return "var(--label-red, red)";
+  if (typeof CSS !== "undefined" && CSS.supports("color", v)) return v;
+  return null;
+}
+
+function readLabelLook(svg: string): LabelLook | null {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const rect = doc.querySelector("rect");
+  const text = doc.querySelector("text");
+  if (!rect || !text) return null;
+  const fill = rect.getAttribute("fill") ?? rect.style.fill;
+  return { box: themeColour(fill), text: themeColour(text.getAttribute("fill") ?? text.style.fill) };
+}
+
+/**
+ * Colour labels that are not monochrome (三省堂国語辞典's red 由来 and 区別 boxes) the way their
+ * picture does: a filled box when its rectangle is filled, in the theme's version of that colour.
+ */
+export async function labelColours(root: HTMLElement) {
+  const labels = Array.from(root.querySelectorAll<HTMLElement>(".nj-label[data-src]"));
+  await Promise.all(
+    labels.map(async (el) => {
+      const src = el.dataset.src!;
+      let look = labelLooks.get(src);
+      if (!look) {
+        look = fetch(src)
+          .then((r) => (r.ok ? r.text() : ""))
+          .then((t) => (t ? readLabelLook(t) : null))
+          .catch(() => null);
+        labelLooks.set(src, look);
+      }
+      const l = await look;
+      if (!l) return;
+      if (l.box && l.box !== "currentColor") {
+        el.classList.add("nj-label-fill");
+        el.style.setProperty("--nj-label-box", l.box);
+        if (l.text) el.style.setProperty("--nj-label-text", l.text);
+      } else if (l.text && l.text !== "currentColor") {
+        el.style.color = l.text;
+      }
+    }),
+  );
+}
+
 /**
  * Yomitan's `appearance: "monochrome"` images (labels, ▽ marks, gaiji) are shapes to be painted
  * in the text colour, so they follow the theme instead of staying black on dark paper. Like
@@ -243,6 +335,7 @@ export function adaptHtml(html: string, vertical: boolean): string {
   logicalInline(root);
   textGlyphs(root);
   senseBadges(root);
+  textLabels(root);
   kanaOptionalMarks(root);
   realRuby(root);
   if (vertical) {

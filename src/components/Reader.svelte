@@ -4,7 +4,7 @@
   import { settings, saveSettings } from "../lib/settings.svelte";
   import { t } from "../lib/i18n";
   import { api, mediaBase, writeClipboard } from "../lib/api";
-  import { adaptHtml, clearMarks, logicalStyles, markText } from "../lib/layout";
+  import { adaptHtml, clearMarks, labelColours, logicalStyles, markText } from "../lib/layout";
   import { fontFamily } from "../lib/fonts";
   import Icon from "./Icon.svelte";
   import DictBadge from "./DictBadge.svelte";
@@ -149,6 +149,16 @@
       findCount = findMarks.length;
       findIndex = 0;
       if (findMarks.length && (fromFind || app.highlight)) showFind(0);
+    });
+  });
+
+  $effect(() => {
+    // Boxed text labels that keep their own colours (三省堂国語辞典's red 由来 box) read them from their picture.
+    body.html;
+    if (!scroller) return;
+    queueMicrotask(() => {
+      const root = scroller!.querySelector<HTMLElement>(".entry");
+      if (root) labelColours(root);
     });
   });
 
@@ -1075,16 +1085,16 @@
   /* Sense numbers (三省堂国語辞典 一 二 三): a rounded box in the text colour, the numeral in the paper colour. */
   .entry-body :global(.nj-badge) {
     display: inline-block;
-    inline-size: 1.25em;
-    block-size: 1.25em;
-    line-height: 1.25em;
-    font-size: 0.78em;
+    inline-size: 1.2em;
+    block-size: 1.2em;
+    line-height: 1.2em;
+    font-size: 0.85em;
     font-weight: bold;
     text-align: center;
     text-indent: 0;
     letter-spacing: 0;
     border-radius: 0.22em;
-    background: color-mix(in srgb, var(--paper-text, var(--text-1)) 78%, var(--reader-bg));
+    background: color-mix(in srgb, var(--paper-text, var(--text-1)) 90%, var(--reader-bg));
     color: var(--reader-bg);
     vertical-align: 0.08em;
   }
@@ -1102,6 +1112,34 @@
     vertical-align: baseline !important;
   }
   .entry-body :global(:has(> .nj-badge)) {
+    vertical-align: baseline !important;
+  }
+  /*
+   * Boxed text labels (三省堂国語辞典 表記 接尾 由来…): the word in the entry font inside a rounded
+   * outline in the text colour. In vertical text the characters stack and the box is one
+   * character wide, centred on the column.
+   */
+  .entry-body :global(.nj-label) {
+    display: inline-block;
+    font-size: 0.9em;
+    line-height: 1.1;
+    padding-block: 0.06em;
+    padding-inline: 0.12em;
+    margin-inline: 0.1em;
+    border: max(1px, 0.07em) solid currentColor;
+    border-radius: 0.28em;
+    text-indent: 0;
+    letter-spacing: 0;
+    white-space: nowrap;
+    vertical-align: 0.08em;
+  }
+  .entry-body :global(.nj-label-fill) {
+    background: var(--nj-label-box);
+    border-color: var(--nj-label-box);
+    color: var(--nj-label-text, var(--reader-bg));
+  }
+  .vertical .entry-body :global(.nj-label),
+  .entry-body :global(:has(> .nj-label)) {
     vertical-align: baseline !important;
   }
   /* Monochrome images: the picture is a mask, painted in the text colour. */
