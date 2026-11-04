@@ -5,7 +5,7 @@ import { isFontId, type FontId, type FontWeight } from "./fonts";
 
 export interface Settings {
   language: "auto" | "en" | "ja";
-  theme: "system" | "light" | "dark";
+  theme: "system" | "light" | "dark" | "oled";
   fontSize: number;
   font: FontId;
   /** Body text weight (headwords and bold runs stay heavier). */

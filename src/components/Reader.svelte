@@ -859,6 +859,7 @@
   }
   /* Monochrome figures are black ink on clear: invert them on dark paper. */
   :global(:root[data-theme="dark"]) .entry-body :global(.ep-mono),
+  :global(:root[data-theme="oled"]) .entry-body :global(.ep-mono),
   :global(:root[data-paper="black"]) .entry-body :global(.ep-mono) {
     filter: invert(1);
   }
@@ -1094,12 +1095,12 @@
     text-indent: 0;
     letter-spacing: 0;
     border-radius: 0.22em;
-    background: color-mix(in srgb, var(--paper-text, var(--text-1)) 90%, var(--reader-bg));
+    background: color-mix(in srgb, var(--paper-text, var(--text-1)) var(--badge-strength, 90%), var(--reader-bg));
     color: var(--reader-bg);
     vertical-align: 0.08em;
   }
   .entry-body :global(.nj-badge-blue) {
-    background: color-mix(in srgb, var(--link) 90%, var(--reader-bg));
+    background: color-mix(in srgb, var(--link) var(--badge-strength, 90%), var(--reader-bg));
   }
   /*
    * Vertical text: inline images, masks and badges sit on the central baseline. Their
