@@ -76,22 +76,25 @@ export function badgeLines(text: string): { lines: string[]; scale: number } {
  * stays sharp at every badge size without making the library database big.
  */
 export async function iconFromFile(file: File, px = 128): Promise<string> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.decoding = "async";
-    img.src = url;
-    await img.decode();
-    const w = img.naturalWidth || px;
-    const h = img.naturalHeight || px;
-    const side = Math.min(w, h);
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = px;
-    const ctx = canvas.getContext("2d")!;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, px, px);
-    return canvas.toDataURL("image/png");
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  // Read the file as a data: URL rather than a blob: URL, because the app's CSP allows
+  // `img-src data:` but not `blob:`.
+  const url = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  const img = new Image();
+  img.decoding = "async";
+  img.src = url;
+  await img.decode();
+  const w = img.naturalWidth || px;
+  const h = img.naturalHeight || px;
+  const side = Math.min(w, h);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = px;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, px, px);
+  return canvas.toDataURL("image/png");
 }
