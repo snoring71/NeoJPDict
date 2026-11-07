@@ -438,7 +438,7 @@
       </div>
       <div class="title-wrap" use:dismiss={() => (menuOpen = false)}>
         <button class="title" onclick={() => (menuOpen = !menuOpen)} disabled={siblings.length === 0}>
-          <DictBadge title={entry.dictTitle} size={24} />
+          <DictBadge title={entry.dictTitle} icon={app.dict(entry.dictId)?.icon} size={24} />
           <span class="title-text">{entry.expression}</span>
           {#if siblings.length > 0}<Icon name="down" size={14} />{/if}
         </button>
@@ -446,7 +446,7 @@
           <div class="menu" role="menu">
             {#each siblings as s (s.termId)}
               <button role="menuitem" onclick={() => { menuOpen = false; app.open(s); }}>
-                <DictBadge title={app.dict(s.dictId)?.title ?? "?"} size={18} />
+                <DictBadge title={app.dict(s.dictId)?.title ?? "?"} icon={app.dict(s.dictId)?.icon} size={18} />
                 <span>{app.dict(s.dictId)?.title}</span>
               </button>
             {/each}

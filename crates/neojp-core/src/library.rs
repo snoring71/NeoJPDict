@@ -166,7 +166,25 @@ pub struct DictionaryInfo {
     pub original_title: String,
     /// Font family for entry text ('' = the app default).
     pub font: String,
+    /// The icon the user chose for the dictionary.
+    pub icon: DictionaryIcon,
 }
+
+/// A dictionary's icon. `kind` is 'auto' (the badge generated from the title), 'text'
+/// (`text` on a `bg` square, in `fg` or a contrasting colour when `fg` is '') or 'image'
+/// (`image`, a `data:image/…` URL the frontend has already downscaled to a small square).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DictionaryIcon {
+    pub kind: String,
+    pub text: String,
+    pub bg: String,
+    pub fg: String,
+    pub image: String,
+}
+
+/// Largest icon image accepted, as a data URL (a 128×128 PNG is usually well under this).
+const MAX_ICON_IMAGE: usize = 512 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Marker {
@@ -367,6 +385,19 @@ impl Library {
                  ALTER TABLE dictionaries ADD COLUMN font TEXT NOT NULL DEFAULT '';",
             )?;
         }
+        // Per-dictionary custom icon (added later).
+        let has_icon: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('dictionaries') WHERE name='icon_kind'")?
+            .exists([])?;
+        if !has_icon {
+            conn.execute_batch(
+                "ALTER TABLE dictionaries ADD COLUMN icon_kind TEXT NOT NULL DEFAULT 'auto';
+                 ALTER TABLE dictionaries ADD COLUMN icon_text TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE dictionaries ADD COLUMN icon_bg TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE dictionaries ADD COLUMN icon_fg TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE dictionaries ADD COLUMN icon_image TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Self { conn })
     }
@@ -397,7 +428,7 @@ impl Library {
         let mut st = self.conn.prepare(
             "SELECT id, kind, CASE WHEN alias != '' THEN alias ELSE title END, revision, author, description,
                     attribution, url, group_name, sort_order, enabled, writing_mode, term_count, meta_count,
-                    kanji_count, source_path, title, font
+                    kanji_count, source_path, title, font, icon_kind, icon_text, icon_bg, icon_fg, icon_image
              FROM dictionaries ORDER BY sort_order, id",
         )?;
         let rows = st.query_map([], |r| {
@@ -420,6 +451,13 @@ impl Library {
                 source_path: r.get(15)?,
                 original_title: r.get(16)?,
                 font: r.get(17)?,
+                icon: DictionaryIcon {
+                    kind: r.get(18)?,
+                    text: r.get(19)?,
+                    bg: r.get(20)?,
+                    fg: r.get(21)?,
+                    image: r.get(22)?,
+                },
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -519,6 +557,32 @@ impl Library {
             "UPDATE dictionaries SET alias=?2, font=?3 WHERE id=?1",
             params![id, alias, font.trim()],
         )?;
+        Ok(())
+    }
+
+    /// Set a dictionary's icon. Anything malformed falls back to the auto badge, and the
+    /// fields the chosen kind doesn't use are cleared so the database keeps no stale image.
+    pub fn update_dictionary_icon(&self, id: i64, icon: &DictionaryIcon) -> Result<()> {
+        let color = |c: &str| {
+            let c = c.trim();
+            let hex = c.strip_prefix('#').unwrap_or("");
+            if hex.len() == 6 && hex.chars().all(|ch| ch.is_ascii_hexdigit()) { c.to_ascii_lowercase() } else { String::new() }
+        };
+        let text: String = icon.text.trim().chars().take(8).collect();
+        let image = icon.image.trim();
+        let valid_image = image.starts_with("data:image/") && image.len() <= MAX_ICON_IMAGE;
+        let (kind, text, bg, fg, image) = match icon.kind.as_str() {
+            "text" if !text.is_empty() => ("text", text, color(&icon.bg), color(&icon.fg), ""),
+            "image" if valid_image => ("image", String::new(), String::new(), String::new(), image),
+            _ => ("auto", String::new(), String::new(), String::new(), ""),
+        };
+        let n = self.conn.execute(
+            "UPDATE dictionaries SET icon_kind=?2, icon_text=?3, icon_bg=?4, icon_fg=?5, icon_image=?6 WHERE id=?1",
+            params![id, kind, text, bg, fg, image],
+        )?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
         Ok(())
     }
 
@@ -1412,6 +1476,42 @@ mod tests {
         assert_eq!(lib.find_dictionary("大辞林 第四版", "").unwrap(), Some(id));
         lib.update_dictionary_display(id, "", "").unwrap();
         assert_eq!(lib.dictionary(id).unwrap().title, "大辞林 第四版");
+    }
+
+    #[test]
+    fn custom_icons() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib.insert_dictionary(&NewDictionary { kind: "yomitan".into(), title: "明鏡国語辞典".into(), ..Default::default() }).unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().icon.kind, "auto");
+
+        let text = DictionaryIcon { kind: "text".into(), text: " 明鏡 ".into(), bg: "#1A6B3C".into(), fg: "nope".into(), image: "data:image/png;base64,AAAA".into() };
+        lib.update_dictionary_icon(id, &text).unwrap();
+        let icon = lib.dictionary(id).unwrap().icon;
+        assert_eq!(icon, DictionaryIcon { kind: "text".into(), text: "明鏡".into(), bg: "#1a6b3c".into(), fg: "".into(), image: "".into() });
+
+        // Renaming and reordering keep the icon.
+        lib.update_dictionary_display(id, "明鏡", "").unwrap();
+        lib.reorder_dictionaries(&[id]).unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().icon.text, "明鏡");
+
+        let img = DictionaryIcon { kind: "image".into(), image: "data:image/png;base64,iVBORw0KGgo=".into(), ..Default::default() };
+        lib.update_dictionary_icon(id, &img).unwrap();
+        let icon = lib.dictionary(id).unwrap().icon;
+        assert_eq!((icon.kind.as_str(), icon.text.as_str(), icon.image.as_str()), ("image", "", "data:image/png;base64,iVBORw0KGgo="));
+
+        // Not an image URL, or too big: back to the auto badge.
+        let bad = DictionaryIcon { kind: "image".into(), image: "javascript:alert(1)".into(), ..Default::default() };
+        lib.update_dictionary_icon(id, &bad).unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().icon, DictionaryIcon { kind: "auto".into(), ..Default::default() });
+        let huge = DictionaryIcon { kind: "image".into(), image: format!("data:image/png;base64,{}", "A".repeat(MAX_ICON_IMAGE)), ..Default::default() };
+        lib.update_dictionary_icon(id, &huge).unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().icon.kind, "auto");
+
+        // Reset.
+        lib.update_dictionary_icon(id, &text).unwrap();
+        lib.update_dictionary_icon(id, &DictionaryIcon::default()).unwrap();
+        assert_eq!(lib.dictionary(id).unwrap().icon.kind, "auto");
+        assert!(lib.update_dictionary_icon(id + 1, &text).is_err());
     }
 }
 

@@ -207,7 +207,7 @@
         <div class="day">{day.label}</div>
         {#each day.items as h (h.id)}
           <button class="mark-row" class:selected={app.selected?.termId === h.termId} onclick={() => app.openTerm(h.termId)}>
-            <DictBadge title={app.dict(h.dictId)?.title ?? "?"} size={18} />
+            <DictBadge title={app.dict(h.dictId)?.title ?? "?"} icon={app.dict(h.dictId)?.icon} size={18} />
             <span class="mark-text"><span class="mark-hw">{h.reading && h.reading !== h.expression ? `${h.reading}【${h.expression}】` : h.expression}</span></span>
             {#if (h.views ?? 1) > 1}<span class="views" title={t("lookups", { n: h.views ?? 1 })}>{h.views}</span>{/if}
           </button>
@@ -235,7 +235,7 @@
       {#if showMarkers}
         {#each shownMarkers as m (m.id)}
           <button class="mark-row" class:selected={app.selected?.termId === m.termId} onclick={() => app.openTerm(m.termId)}>
-            <DictBadge title={app.dict(m.dictId)?.title ?? "?"} size={18} />
+            <DictBadge title={app.dict(m.dictId)?.title ?? "?"} icon={app.dict(m.dictId)?.icon} size={18} />
             <span class="mark-text">
               <span class="mark-hw"><span class="hl" data-color={m.color}>{m.text}</span></span>
               <span class="mark-note">{m.reading && m.reading !== m.expression ? `${m.reading}【${m.expression}】` : m.expression}</span>
@@ -246,7 +246,7 @@
       {#if app.bookmarks.length === 0}<p class="muted pad">{t("noBookmarks")}</p>{/if}
       {#each shownBookmarks as b (b.termId)}
         <button class="mark-row" class:selected={app.selected?.termId === b.termId} onclick={() => app.openTerm(b.termId)}>
-          <DictBadge title={app.dict(b.dictId)?.title ?? "?"} size={18} />
+          <DictBadge title={app.dict(b.dictId)?.title ?? "?"} icon={app.dict(b.dictId)?.icon} size={18} />
           <span class="mark-text">
             <span class="mark-hw">{b.reading && b.reading !== b.expression ? `${b.reading}【${b.expression}】` : b.expression}</span>
             {#if b.note}<span class="mark-note">{b.note}</span>{/if}
@@ -261,7 +261,7 @@
       <div class="list">
         {#each app.dictionaries.filter((d) => d.enabled) as d (d.id)}
           <button class="dict-row" onclick={() => app.loadBrowse(d.id)}>
-            <DictBadge title={d.title} size={28} />
+            <DictBadge title={d.title} icon={d.icon} size={28} />
             <span>{d.title}</span>
           </button>
         {/each}

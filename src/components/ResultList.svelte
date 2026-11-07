@@ -44,7 +44,7 @@
     {@const d = app.dict(g.dictId)}
     {#if grouped}
       <button class="group-head" onclick={() => (collapsed[g.dictId] = !collapsed[g.dictId])}>
-        <DictBadge title={d?.title ?? "?"} />
+        <DictBadge title={d?.title ?? "?"} icon={d?.icon} />
         <span class="group-title">{d?.title}</span>
         <span class="count">{g.hits.length === 1 ? t("headwordCountOne") : t("headwordCount", { n: g.hits.length })}</span>
       </button>
@@ -59,7 +59,7 @@
           role="option"
           aria-selected={app.selected?.termId === h.termId}
           onclick={() => onpick(h)}>
-          {#if !grouped}<DictBadge title={d?.title ?? "?"} size={18} />{/if}
+          {#if !grouped}<DictBadge title={d?.title ?? "?"} icon={d?.icon} size={18} />{/if}
           <span class="hw">
             <span class="main">{l.main}</span><span class="sub">{l.sub}</span>
             {#if h.snippet}

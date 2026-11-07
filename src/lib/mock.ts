@@ -11,7 +11,7 @@ interface Fixture {
 const sampleDict = (id: number, title: string, groupName: string): DictionaryInfo => ({
   id, kind: "yomitan", title, revision: "1", author: "", description: "", attribution: "", url: "",
   groupName, sortOrder: id, enabled: true, writingMode: "auto", termCount: 2, metaCount: 0, kanjiCount: 0,
-  originalTitle: title, font: "",
+  originalTitle: title, font: "", icon: { kind: "auto", text: "", bg: "", fg: "", image: "" },
 });
 
 const sample: Fixture = {
@@ -185,6 +185,17 @@ export const mockApi = {
     d.originalTitle ??= d.title;
     d.title = alias.trim() || d.originalTitle;
     d.font = font;
+  },
+  async update_dictionary_icon({ id, icon }: any) {
+    const d = (await data()).dictionaries.find((x) => x.id === id)!;
+    const kind = icon.kind === "text" && icon.text.trim() ? "text" : icon.kind === "image" && icon.image.startsWith("data:image/") ? "image" : "auto";
+    d.icon = {
+      kind,
+      text: kind === "text" ? icon.text.trim() : "",
+      bg: kind === "text" ? icon.bg : "",
+      fg: kind === "text" ? icon.fg : "",
+      image: kind === "image" ? icon.image : "",
+    };
   },
   async reorder_dictionaries({ ids }: any) {
     const d = await data();

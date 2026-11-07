@@ -12,5 +12,5 @@ pub mod yomitan;
 
 pub use error::{Error, Result};
 pub use library::{
-    DictionaryInfo, Entry, ExternalBodies, HistoryItem, Library, MatchMode, SearchHit, SearchQuery,
+    DictionaryIcon, DictionaryInfo, Entry, ExternalBodies, HistoryItem, Library, MatchMode, SearchHit, SearchQuery,
 };
