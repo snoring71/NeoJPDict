@@ -156,7 +156,7 @@ button {
   color: inherit;
 }
 
-button:not(.icon):not(.tool):not(.hit):not(.group-head):not(.link):not(.title):not(.mode):not(.clear):not([role]):not(.dict-row):not(.text-btn):not(.mark-row):not(.chip):not(.p):not(.k):not(.reset):not(.pick-btn):not(.swatch) {
+button:not(.icon):not(.tool):not(.hit):not(.group-head):not(.link):not(.title):not(.mode):not(.clear):not([role]):not(.dict-row):not(.text-btn):not(.mark-row):not(.chip):not(.p):not(.k):not(.reset):not(.pick-btn):not(.swatch):not(.badge-button) {
   padding: 6px 14px;
   border-radius: 6px;
   border: 1px solid var(--divider-strong);

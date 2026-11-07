@@ -2,6 +2,7 @@
 // (`npm run dev` without Tauri) it falls back to an in-memory mock so the UI
 // can be developed and tested without the native shell.
 import type {
+  DictIcon,
   DictionaryInfo,
   EntryView,
   HistoryItem,
@@ -47,6 +48,7 @@ export const api = {
   updateDictionary: (id: number, enabled: boolean, groupName: string, writingMode: WritingMode) =>
     call<void>("update_dictionary", { id, enabled, groupName, writingMode }),
   updateDictionaryDisplay: (id: number, alias: string, font: string) => call<void>("update_dictionary_display", { id, alias, font }),
+  updateDictionaryIcon: (id: number, icon: DictIcon) => call<void>("update_dictionary_icon", { id, icon }),
   reorderDictionaries: (ids: number[]) => call<void>("reorder_dictionaries", { ids }),
   importDictionaries: (paths: string[]) => call<void>("import_dictionaries", { paths }),
 };

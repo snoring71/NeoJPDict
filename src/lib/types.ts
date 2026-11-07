@@ -22,6 +22,18 @@ export interface DictionaryInfo {
   originalTitle: string;
   /** Entry font: '' (app default), 'mincho', 'gothic' or a font family name. */
   font: string;
+  icon: DictIcon;
+}
+
+/** A dictionary's icon: the auto badge, a text badge, or an image (a `data:image/…` URL). */
+export interface DictIcon {
+  kind: "auto" | "text" | "image";
+  text: string;
+  /** `#rrggbb`, or '' for the auto colour. */
+  bg: string;
+  /** `#rrggbb`, or '' for white or black, whichever reads better on `bg`. */
+  fg: string;
+  image: string;
 }
 
 export interface SearchQuery {

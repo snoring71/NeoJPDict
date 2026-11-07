@@ -2,7 +2,7 @@
 
 use neojp_core::epwing::{self, EpwingStore};
 use neojp_core::{
-    DictionaryInfo, Entry, ExternalBodies, HistoryItem, Library, SearchHit, SearchQuery, yomitan,
+    DictionaryIcon, DictionaryInfo, Entry, ExternalBodies, HistoryItem, Library, SearchHit, SearchQuery, yomitan,
 };
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -250,6 +250,11 @@ fn update_dictionary_display(state: State<AppState>, id: i64, alias: String, fon
 }
 
 #[tauri::command]
+fn update_dictionary_icon(state: State<AppState>, id: i64, icon: DictionaryIcon) -> CmdResult<()> {
+    state.lib.lock().unwrap().update_dictionary_icon(id, &icon).map_err(err)
+}
+
+#[tauri::command]
 fn reorder_dictionaries(state: State<AppState>, ids: Vec<i64>) -> CmdResult<()> {
     state.lib.lock().unwrap().reorder_dictionaries(&ids).map_err(err)
 }
@@ -486,6 +491,7 @@ pub fn run() {
             update_dictionary,
             reorder_dictionaries,
             update_dictionary_display,
+            update_dictionary_icon,
             set_global_shortcut,
             import_dictionaries,
         ])

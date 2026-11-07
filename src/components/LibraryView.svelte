@@ -5,7 +5,7 @@
   import type { DictionaryInfo, WritingMode } from "../lib/types";
   import { FONT_IDS, FONT_PRESETS, isFontId } from "../lib/fonts";
   import Icon from "./Icon.svelte";
-  import DictBadge from "./DictBadge.svelte";
+  import IconEditor from "./IconEditor.svelte";
 
   let { onimport }: { onimport: (paths: string[]) => void } = $props();
 
@@ -89,7 +89,7 @@
   <ul class="dicts">
     {#each app.dictionaries as d, i (d.id)}
       <li class:disabled={!d.enabled}>
-        <DictBadge title={d.title} size={36} />
+        <IconEditor dict={d} />
         <div class="info">
           <div class="name">
             <input
